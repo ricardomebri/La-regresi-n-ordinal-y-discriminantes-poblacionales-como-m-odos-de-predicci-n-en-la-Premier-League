@@ -1,0 +1,2766 @@
+---
+title: "Tesis"
+output:
+  word_document: default
+  html_document:
+    df_print: paged
+  pdf_document: default
+date: "2024-02-12"
+author: "Ricardo Odilón Méndez Bribiesca"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(psych)      
+```
+
+## Premier League
+Para analizar la primera división de fútbol inglesa, se analizarán datos de los últimos 9 años. Esta información incluye goles a favor y en contra, tipos de goles, tipos de pases, inversión en transferencias, asistencia al estadio, entre otras. El objetivo será encontrar que variables influyen más en la posición en la tabla, así como en si un equipo podrá entrar a puestos de Champions League o salvarse de un posible descenso. A continuación se muestra un resumen de la data que se analizará:
+
+
+```{r cars}
+#Importar datos
+#Ubi1 <- "~/Personal/Tesis/Premier League estadísticas.xlsx" #Asus
+#Ubi1 <- "~/Ricardo/Tesis/Premier League estadísticas act.xlsx" #Lenovo
+#Ubi1 <-"Premier League estadísticas.xlsx"
+Ubi1 <- "C:/Ricardo/Tesis/Premier League estadísticas act.xlsx" #Surface
+Tabla_Historica <- read_excel(Ubi1, sheet = "BD")
+Tabla_Historica$Big6 <- as.character(Tabla_Historica$Big6)
+Tabla_Historica$Champions <- as.character(Tabla_Historica$Champions)
+Tabla_Historica$RecienAscendido <- as.character(Tabla_Historica$RecienAscendido)
+Tabla_Historica$CompetenciasEuropeas <- as.character(Tabla_Historica$CompetenciasEuropeas)
+Tabla_Historica$Anio <- as.numeric(Tabla_Historica$Anio)
+Tabla_Historica <- Tabla_Historica  %>% mutate(BalanceTransferencias=DineroGastadoEnTransferenciasMillonesDeEuros-DineroIngresadoPorTransferenciasMillonesDeEuros)
+Resumen <- summary(Tabla_Historica)
+Resumen
+
+
+#4.1
+png("41.png", width = 800, height = 600)
+bp41 <- boxplot(Tabla_Historica$DF ~ Tabla_Historica$Posicion,
+        col = "lightgreen",
+        main = "Distribución de la diferencia de goles por posición en la tabla",
+        xlab = "Posición",
+        ylab = "Diferencia de goles")
+dev.off()
+bp41
+getwd()
+```
+Al ver los cuartiles y el promedio se observan variables con gran variabilidad que podrían sugerir un impacto en la posición de cada equipo, tales como Goles a Favor,  Goles en Contra, Tiros a puerta, Goles de Contragolpe, Valor promedio de los jugadores, Inversión en transferencias o la Asistencia promedio al estadio. ¿Alguna de estas variables podría explicar por sí sola la posición de cada equipo? ¿Variables extracancha tienen un impacto significativo? ¿Participar en competencias europeas impacta en el rendimiento de la liga local? ¿Existe algún estilo de juego que influya en la posición de cada equipo (ofensivo como el Manchester City o defensivo con el West Ham United)?
+
+Para tratar de resolver estas preguntas se explorarán los datos para encontrar relaciones
+
+## Distribución de tiros y goles
+
+A continuación se presentan los histogramas de Tiros a Gol, Goles esperados a favor, Goles a favor y su división si los equipos pertenecen al Big 6* o si son recien ascendidos
+
+*El Big 6 es un grupo de equipos considerados como los más relevantes de la liga en términos de historia, títulos y poder económico. Estos equipos son Arsenal, Chelsea, Liverpool, Manchester City, Manchester United y Tottenham Hotspur
+
+```{r, echo=FALSE}
+#Tiros a puerta
+ggplot(Tabla_Historica, aes(x = TirosAGol, fill = as.factor(Big6))) +
+  geom_histogram(binwidth = 5, position = "identity", alpha = 0.6) +
+  scale_fill_manual(values = c("0" = "#1f77b4", "1" = "#d62728"),
+                    labels = c("0" = "No Big 6", "1" = "Big 6")) +
+  theme_bw() +
+  labs(title = "Distribución de Tiros a Gol",
+       x = "Tiros a Gol", y = "Frecuencia", fill = "Equipo")
+
+ggplot(Tabla_Historica, aes(x = XGF)) +
+  geom_histogram()
+
+ggplot(Tabla_Historica, aes(x = GaF, fill = as.factor(Big6))) +
+  geom_histogram(binwidth = 5, position = "identity", alpha = 0.6) +
+  scale_fill_manual(values = c("0" = "#1f77b4", "1" = "#d62728"),
+                    labels = c("0" = "No Big 6", "1" = "Big 6")) +
+  theme_bw() +
+  labs(title = "Distribución de Goles a Favor",
+       x = "Goles a Favor", y = "Frecuencia", fill = "Equipo")
+
+ggplot(Tabla_Historica, aes(y = DF, x = Big6)) +
+  geom_boxplot() +
+  theme_bw() +
+  xlab("Equipos del Big 6 (0=NO, 1=Sí)")+
+  ylab("Diferencia de goles")
+
+ggplot(Tabla_Historica, aes(y = DF, x = RecienAscendido)) +
+  geom_boxplot() +
+  theme_bw() +
+  xlab("Equipos Recien Ascendidos (0=NO, 1=Sí)")+
+  ylab("Diferencia de goles")
+```
+Se puede observar una concentración de tiros a gol entre 100 y 200 por temporada, Goles esperados entre 36 y 54 y Goles a Favor entre 35 y 62. Lo que podría decirnos que equipos fuera de estos rango puedan estar en posiciones muy altas o muy bajas. Asímismo, los equipos del Big muestran una diferencia de goles muy superior al resto de la liga, mientras que los recien ascendidos tienden a tener una diferencia mucho menor. Lo que podría indicar que pertenecer a estos grupos podría predisponer el rendimiento durante la temporada.
+
+
+## Consistencia año con año
+
+Para entender si el rendimiento durante un año influye en el rendimiento del siguiente, se analizarán los goles por tiro a gol 
+
+
+```{r , echo=FALSE}
+
+## Goles por tiro a gol
+Goles_por_tiro <-
+  Tabla_Historica |>
+  select(Equipo, Anio,TirosAGol,Champions, GaF) |>
+  arrange(Equipo, Anio,TirosAGol, GaF) |>
+  mutate(GpT = GaF/TirosAGol) 
+  #filter(TirosAGol<300)
+  
+## Lag
+Goles_por_tiro_lag <-
+  Goles_por_tiro |>
+  mutate(Anio = Anio + 1) |>
+  rename(GpT_Pasado = GpT)
+
+## Unir tablas
+Goles_por_tiro_con_lag <-
+  Goles_por_tiro |>
+  inner_join(Goles_por_tiro_lag,by = c("Equipo", "Anio", "Champions"))
+#View(Goles_por_tiro_con_lag)
+
+## Tottenham
+Goles_por_tiro_con_lag |>
+  filter(Equipo %in% c("Tottenham Hotspur", "Manchester City")) |>
+  print(n = Inf)
+
+## R
+Goles_por_tiro_con_lag1 <- filter(Goles_por_tiro_con_lag,GpT>0 & GpT_Pasado>0 )
+scatter_Goles_por_tiro <-
+  ggplot(Goles_por_tiro_con_lag1, aes(x = GpT_Pasado, y = GpT)) +
+  geom_point() +
+  facet_grid(cols = vars(Champions)) +
+  labs(
+    x = "Goles por tiro, Año n",
+    y = "Goles por tiro, Año n + 1"
+  ) +
+  theme_bw() +
+  theme(strip.background = element_blank())
+print(scatter_Goles_por_tiro)
+
+# add geom_smooth() to the previously saved plot
+scatter_Goles_por_tiro +
+  geom_smooth(method = "lm")
+
+## Correlación
+Goles_por_tiro_con_lag1 |>
+  filter(!is.na(GpT) & !is.na(GpT_Pasado)) |>
+  group_by(Champions) |>
+  summarize(correlation = cor(GpT, GpT_Pasado))
+
+```
+
+No se logró encontrar una correlación significativa entre los goles por tiro de un año con los del siguiente, por lo que estadísticamente un equipo que no sea tan preciso un año podría mejorar considerablemente para el siguiente.
+
+Se repite el ejercicio pero ahora haciendo distinción entre los goles dentro y fuera del área por tiro a gol
+
+```{r , echo=FALSE}
+## Goles fuera del area
+GolesF_por_tiro <-
+  Tabla_Historica |>
+  select(Equipo, Anio,TirosAGol,Champions, GolFueraA) |>
+  arrange(Equipo, Anio,TirosAGol, GolFueraA) |>
+  mutate(GFpT = GolFueraA/TirosAGol)
+#filter(TirosAGol<300)
+
+## Lag
+GolesF_por_tiro_lag <-
+  GolesF_por_tiro |>
+  mutate(Anio = Anio + 1) |>
+  rename(GFpT_Pasado = GFpT)
+
+## Unir tablas
+GolesF_por_tiro_con_lag <-
+  GolesF_por_tiro |>
+  inner_join(GolesF_por_tiro_lag,by = c("Equipo", "Anio", "Champions"))
+#View(GolesF_por_tiro_con_lag)
+
+
+## R
+GolesF_por_tiro_con_lag1 <- filter(GolesF_por_tiro_con_lag,GFpT>0 & GFpT_Pasado>0 )
+scatter_GolesF_por_tiro <-
+  ggplot(GolesF_por_tiro_con_lag1, aes(x = GFpT_Pasado, y = GFpT)) +
+  geom_point() +
+  #facet_grid(cols = vars(Champions)) +
+  labs(
+    x = "Goles por tiro, Año n",
+    y = "Goles por tiro, Año n + 1"
+  ) +
+  theme_bw() +
+  theme(strip.background = element_blank())
+print(scatter_GolesF_por_tiro)
+
+# add geom_smooth() to the previously saved plot
+scatter_GolesF_por_tiro +
+  geom_smooth(method = "lm")
+
+## Correlación
+GolesF_por_tiro_con_lag1 |>
+  filter(!is.na(GFpT) & !is.na(GFpT_Pasado)) |>
+  summarize(correlation = cor(GFpT, GFpT_Pasado))
+
+
+
+
+## Goles dentro del area
+GolesD_por_tiro <-
+  Tabla_Historica |>
+  select(Equipo, Anio,TirosAGol,Champions, GolDentroA) |>
+  arrange(Equipo, Anio,TirosAGol, GolDentroA) |>
+  mutate(GDpT = GolDentroA/TirosAGol)
+#filter(TirosAGol<300)
+
+## Lag
+GolesD_por_tiro_lag <-
+  GolesD_por_tiro |>
+  mutate(Anio = Anio + 1) |>
+  rename(GDpT_Pasado = GDpT)
+
+## Unir tablas
+GolesD_por_tiro_con_lag <-
+  GolesD_por_tiro |>
+  inner_join(GolesD_por_tiro_lag,by = c("Equipo", "Anio", "Champions"))
+#View(GolesD_por_tiro_con_lag)
+
+
+## R
+GolesD_por_tiro_con_lag1 <- filter(GolesD_por_tiro_con_lag,GDpT>0 & GDpT_Pasado>0 )
+scatter_GolesD_por_tiro <-
+  ggplot(GolesD_por_tiro_con_lag1, aes(x = GDpT_Pasado, y = GDpT)) +
+  geom_point() +
+  labs(
+    x = "Goles Dentro del Area por tiro, Año n",
+    y = "Goles Dentro del Area por tiro, Año n + 1"
+  ) +
+  theme_bw() +
+  theme(strip.background = element_blank())
+print(scatter_GolesD_por_tiro)
+
+# add geom_smooth() to the previously saved plot
+scatter_GolesD_por_tiro +
+  geom_smooth(method = "lm")
+
+## Correlación
+GolesD_por_tiro_con_lag1 |>
+  filter(!is.na(GDpT) & !is.na(GDpT_Pasado)) |>
+  summarize(correlation = cor(GDpT, GDpT_Pasado))
+```
+De igual manera, no se logró encontrar una correlación significativa entre los goles por tiro de un año con los del siguiente, por lo que estadísticamente un equipo que no sea tan preciso un año podría mejorar considerablemente para el siguiente.
+
+## Correlación
+
+```{r , echo=FALSE}
+library(corrplot)
+Tabla_Historica7 <- read_excel(Ubi1, sheet = "BD")
+Tabla_Historica3 <- Tabla_Historica7  %>% select(-Equipo,-Champions,-Descenso,-Temporada, -Anio,-XGF,-XGC,-GvsXG)
+
+Tabla_Historica3$Big6 <- as.numeric(Tabla_Historica3$Big6)
+Tabla_Historica3$RecienAscendido <- as.numeric(Tabla_Historica3$RecienAscendido)
+Tabla_Historica3$CompetenciasEuropeas <- as.numeric(Tabla_Historica3$CompetenciasEuropeas)
+
+R <- cor(Tabla_Historica3)
+jpeg(file="46.jpeg",width=1000, height=700)
+corrplot(R,method = "color",addCoef.col="grey",order = "AOE",tl.cex=0.8, number.cex=0.35)
+dev.off()
+#corrplot(R,method = "color",addCoef.col="grey",order = "AOE",number.cex=0.5)
+#png(height=1200, width=1500, pointsize=15, file="overlap.png")
+#corrplot(R, method = "color", addCoef.col="grey", order = "AOE")
+```
+```{r , echo=FALSE}
+## Correlación - Versión 4 (Posición como primera variable)
+
+## Correlación - Versión 4 Corregida (Posición como primera variable)
+
+library(corrplot)
+Tabla_Historica7 <- read_excel(Ubi1, sheet = "BD")
+
+# Seleccionar variables con Posición primero
+Tabla_Historica3 <- Tabla_Historica7  %>% 
+  select(Posicion, everything(), -Equipo, -Champions, -Descenso, -Temporada, -Anio, -XGF, -XGC, -GvsXG)
+
+# Convertir variables categóricas a numéricas
+Tabla_Historica3$Big6 <- as.numeric(Tabla_Historica3$Big6)
+Tabla_Historica3$RecienAscendido <- as.numeric(Tabla_Historica3$RecienAscendido)
+Tabla_Historica3$CompetenciasEuropeas <- as.numeric(Tabla_Historica3$CompetenciasEuropeas)
+
+# Calcular matriz de correlación
+R <- cor(Tabla_Historica3)
+
+# Crear visualización con order = "original"
+jpeg(file="46_v4.jpeg", width=1200, height=900)
+corrplot(R,
+         method = "color",
+         addCoef.col = "grey",
+         order = "original",
+         tl.cex = 0.85,
+         number.cex = 0.4,
+         cl.cex = 0.8,
+         mar = c(0, 0, 1, 0))
+#title("Matriz de Correlación - Posición como Variable Principal", line = 0.5)
+dev.off()
+
+# Mostrar la matriz en consola para referencia
+print(R)
+```
+
+
+
+
+
+
+
+Se pueden observar 2 grupos altamente correlacionados: 1.Variables relacionadas con goles anotados con variables relacionadas con cantidad de pases y valor de la plantilla; 2. Variables relacionadas con goles recibidos con goles, pases y valor de plantilla.
+
+Por este motivo, se explorarán variables relacionadas con goles, tiros, asistencia al estadio y valor de plantilla como paso previo a los modelos. 
+
+En primer término, se observará la relación entre la asistencia al estadio con la ventaja de local y la posición con el valor de los jugadores
+
+```{r , echo=FALSE}
+tablasinpandemia <- Tabla_Historica %>% filter(Anio  %in% c(16,17,18,19,22,23,24))
+ggplot(tablasinpandemia, aes(x = AsistenciaPromedioAlEstadio, y = VentajaLocal)) +
+  geom_point() +
+  theme_bw() +
+  stat_smooth(method="lm")
+
+
+ggplot(Tabla_Historica, aes(y = ValorPromedioJugadores, x = Posicion)) +
+  geom_point() +
+  theme_bw() +
+  stat_smooth(method="lm")
+
+##promedio valor promedio jugador
+promprom <-
+  Tabla_Historica |>
+  group_by(Posicion) |>
+  summarize(ValorPromJug = mean(ValorPromedioJugadores))
+jpeg(file="47.jpeg",width=1000, height=700)
+ggplot(promprom, aes(x = Posicion, y = ValorPromJug)) +
+  geom_point() +
+  theme_bw() +
+  stat_smooth(method = "lm")
+dev.off()
+```
+Al hacer un par de cálculos extras para obtener el valor promedio de los jugadores de los equipos dependiendo de su posición, se observa una clara relación entre un valor alto y una mejor posición en la tabla para los primeros 6 lugares, sin embargo de media tabla hacia abajo los valores promedio son similares, lo que indica que tener jugadores de valor alto no asegura la permanencia en la primera división
+
+
+## Regresiones lineales
+Como ejercicio, se realizarán dos regresiones lineales para entender qué variables pueden influir más en la posición final:
+
+```{r , echo=FALSE}
+mod1 <-lm(Posicion ~ 1 + DF, data = Tabla_Historica)
+summary(mod1)
+
+Tabla_Historica1 <-
+  Tabla_Historica |>
+  mutate(rpos = resid(mod1))
+
+Tabla_Historica1
+```
+
+Como primer ejercicio, el primer modelo podría estimar la posición de la siguiente manera:$$Posicion = 10.5035 - .187089*DiferenciaGoles$$
+
+Esto indica que la posición en la tabla se ve negativamente relacionada con la diferencia de goles; es decir por cada gol neto, la posición mejora en .187089 lugares. 
+
+Este modelo mostró un nivel alto de significancia; sin embargo tiene algunas limitantes; ya que asume que las posiciones son continuas y no enteras.
+
+Como ejercicio, se hará una regresión lineal múltiple y se hará uso de los criterios de Akaike y de BIC para determinar el modelo que utilice la menor cantidad de variables con la mayor significancia.
+
+```{r , echo=FALSE}
+
+library(dplyr)
+Tabla_Historica2 <- Tabla_Historica  %>% select(-Champions,-Descenso,-Temporada, -Anio)
+
+mod2 <-lm(Posicion ~ .,data = Tabla_Historica2)
+summary(mod2)
+
+Tabla_Historica21 <- Tabla_Historica %>% filter(!is.na(XGF)) %>% select(-Champions,-Descenso,-Temporada, -Anio) %>% filter()
+
+mod21 <-lm(Posicion ~ .,data = Tabla_Historica21)
+summary(mod21)
+
+library(MASS)
+
+sel1 <- stepAIC(mod21, trace = F)
+sel1$anova
+summary(sel1)
+
+sel2 <- stepAIC(mod21,
+                trace = F,
+                k = log(nrow(Tabla_Historica21))) 
+sel2$anova
+summary(sel2)
+
+detach("package:MASS", unload = TRUE)
+
+#Modelo finaL
+library(caret)
+library(scoring)
+set.seed(2017)
+library(VGAM)
+Tabla_Historica14 <- read_excel(Ubi1, sheet = "BD")
+ind_val14 <- createDataPartition(Tabla_Historica14$Posicion, p = 0.7, list = F) # tomamos 70% de los datos para entrenamiento
+Tabla_train <- Tabla_Historica14[ind_val14,]
+Tabla_test <- Tabla_Historica14[-ind_val14,]
+
+
+modf <-lm(Posicion ~ GaF + GaC + GolContragolpe + Centros + CompetenciasEuropeas,data = Tabla_train)
+summary(modf)
+
+#Resultados
+PosicionRealL <-  Tabla_test[,1]
+PrediccionesL <- as.vector(predict(modf,Tabla_test,type="response"))
+PosicionPredL <- round(PrediccionesL,0)
+
+restaL <- abs(PosicionRealL-PosicionPredL)
+ProbSinErrorL <- mean(restaL < 1)
+ProbError1L <- mean(restaL <= 1)
+ProbError2L <- mean(restaL <= 2)
+
+ProbSinErrorL
+ProbError1L
+ProbError2L
+
+```
+```{r , echo=FALSE}
+
+library(readxl)
+library(dplyr)
+
+# Cargar datos
+Ubi1 <- "C:/Ricardo/Tesis/Premier League estadísticas act.xlsx"
+Tabla_Historica <- read_excel(Ubi1, sheet = "BD")
+
+# Preparar datos igual que antes
+Tabla_Historica2 <- Tabla_Historica %>% 
+  select(-Champions, -Descenso, -Temporada, -Anio, -Equipo)
+
+# Remover NaN
+Tabla_Historica2_clean <- Tabla_Historica2 %>% 
+  na.omit()
+
+# Correr modelo completo
+mod_completo <- lm(Posicion ~ ., data = Tabla_Historica2_clean)
+
+# Extraer tabla de forma ROBUSTA
+summary_mod <- summary(mod_completo)$coefficients
+coefs_df <- data.frame(
+  Variable = rownames(summary_mod),
+  Coeficiente = summary_mod[, "Estimate"],
+  StdError = summary_mod[, "Std. Error"],
+  t_value = summary_mod[, "t value"],
+  p_value = summary_mod[, "Pr(>|t|)"],
+  row.names = NULL
+)
+
+# Ver solo las variables significativas (|coef| > 0.05)
+coefs_importantes <- coefs_df %>%
+  filter(abs(Coeficiente) > 0.05 | Variable == "(Intercept)") %>%
+  arrange(desc(abs(Coeficiente)))
+
+print(coefs_importantes)
+
+# Si quieres ver TODAS (incluso las pequeñas)
+print(coefs_df)
+
+
+```
+
+
+
+
+Al analizar los modelos finales después de la selección, el modelo que utilizó el criterio de BIC arrojó 5 variables como las más significativas: Goles a Favor, Goles en Contra, Goles de contragolpe, Centros y Participación en competencias europeas. El modelo fue el siguiente: $$Posicion = 7.382702 -0.148137*GaF + 0.181642   *GaC -0.172585*GolContragolpe + 0.003628*Centros - 1.772378*CompetenciasEuropeas$$
+Este modelo indica que por cada gol a favor, la posición mejora en .1428 lugares; por el contrario, un gol en contra castiga más la posición y la baja en .1785 unidades. Los goles de contragolpe mejoran en .2370 unidades la posición, lo que podría beneficiar a equipos que recuperan el balón en zonas bajas y se despliegan rápidamente.Asimismo, el modelo arroja que la posición empeora en .0048 lugarees por cada centro lanzado, lo cual a primer vistazo indica que este tipo de ataque no es tan eficiente. Finalmente, el modelo indica que si el equipo está participando en competencias europeas (Quedaron en el top 6 en la temporada anterior o ganaron la FA Cup o la Carabao Cup), su posición se beneficia en 2 unidades. Lo que indica que si un equipo tuvo buen rendimiento en un año, tiende a hacerlo bien al siguiente.
+
+Ahora, este modelo sigue teniendo varias limitaciones ya que arroja resultados continuos que hasta se pueden salir del dominio. Por este motivo, se usará el modelo de regresión ordinal, el cuál arrojará la probabilidad de que cada equipo quede en cada posición de la tabla. 
+
+
+
+
+## 4.1 Regresión Lineal - SELECCIÓN DE VARIABLES POR AIC
+
+Como primer paso, se realiza un análisis de regresión lineal univariada para entender cómo una única variable (Diferencia de Goles) se relaciona con la posición final:
+
+```{r , echo=FALSE}
+# Modelo univariado
+mod1 <- lm(Posicion ~ 1 + DF, data = Tabla_Historica)
+summary(mod1)
+
+# Interpretación: por cada gol neto, la posición mejora en aproximadamente 0.187 lugares
+```
+
+Ecuación univariada: $$Posicion = 10{.}5035 - 0{.}187089 \cdot DiferenciaGoles$$
+
+Aunque este modelo es simple e interpretable, asume que existen otras variables que podrían mejorar significativamente las predicciones. A continuación, se corre un modelo con TODAS las variables disponibles (40 predictores) y se aplica selección automática mediante AIC.
+
+```{r , echo=FALSE}
+library(readxl)
+library(MASS)
+library(caret)
+library(dplyr)
+
+# Cargar datos y preparar
+Ubi1 <- "C:/Ricardo/Tesis/Premier League estadísticas act.xlsx"
+Tabla_Historica <- read_excel(Ubi1, sheet = "BD")
+
+# Preparar datos: remover variables categóricas y NAs
+Tabla_Historica_clean <- Tabla_Historica %>%
+  dplyr::select(-Equipo, -Champions, -Descenso, -Temporada, -Anio, -XGF, -XGC, -GvsXG) %>%
+  na.omit()
+
+# MODELO COMPLETO CON TODAS LAS VARIABLES
+mod_full <- lm(Posicion ~ ., data = Tabla_Historica_clean)
+cat("Modelo completo\n")
+cat("AIC:", AIC(mod_full), "\n")
+cat("R-squared:", summary(mod_full)$r.squared, "\n\n")
+
+# SELECCIÓN AIC - STEPWISE BACKWARD
+sel_aic <- stepAIC(mod_full, trace = 0, direction = "backward")
+cat("Modelo AIC-seleccionado\n")
+cat("Número de variables:", length(coef(sel_aic)) - 1, "\n")
+cat("AIC:", AIC(sel_aic), "\n")
+cat("R-squared:", summary(sel_aic)$r.squared, "\n")
+
+# Extraer variables seleccionadas por AIC
+vars_aic <- names(coef(sel_aic))[-1]
+cat("Variables seleccionadas por AIC:", paste(vars_aic, collapse = ", "), "\n\n")
+
+# TABLA COMPARATIVA
+coefs_full <- coef(mod_full)
+coefs_aic <- coef(sel_aic)
+
+tabla_comp <- data.frame(
+  Variable = names(coefs_full[-1]),
+  Coef_Completo = as.numeric(coefs_full[-1]),
+  Incluida_AIC = names(coefs_full[-1]) %in% vars_aic,
+  stringsAsFactors = FALSE
+)
+
+tabla_comp_print <- tabla_comp %>%
+  dplyr::filter(Incluida_AIC | abs(Coef_Completo) > 0.1) %>%
+  dplyr::arrange(desc(abs(Coef_Completo)))
+
+cat("Tabla 4.1: Comparación de coeficientes\n")
+print(tabla_comp_print)
+```
+
+```{r , echo=FALSE}
+# ===== TRAIN-TEST VALIDATION =====
+set.seed(2017)
+ind_val <- createDataPartition(Tabla_Historica$Posicion, p = 0.7, list = FALSE)
+
+train_data <- Tabla_Historica[ind_val, c("Posicion", vars_aic)] %>% na.omit()
+test_data <- Tabla_Historica[-ind_val, c("Posicion", vars_aic)] %>% na.omit()
+
+cat("Train set:", nrow(train_data), "observations\n")
+cat("Test set:", nrow(test_data), "observations\n\n")
+
+# Train final model
+formula_final <- paste("Posicion ~", paste(vars_aic, collapse = " + "))
+mod_final <- lm(as.formula(formula_final), data = train_data)
+
+cat("===== COEFICIENTES FINALES =====\n")
+print(summary(mod_final)$coefficients)
+
+# Predictions
+pred_test <- predict(mod_final, test_data)
+pred_rounded <- round(pred_test, 0)
+actual <- test_data$Posicion
+
+# Error metrics
+error <- abs(actual - pred_rounded)
+accuracy_exact <- mean(error < 1)
+accuracy_pm1 <- mean(error <= 1)
+accuracy_pm2 <- mean(error <= 2)
+
+cat("\n===== PRECISIÓN EN TEST SET =====\n")
+cat("Exacta:", round(accuracy_exact, 4), "\n")
+cat("±1 posición:", round(accuracy_pm1, 4), "\n")
+cat("±2 posiciones:", round(accuracy_pm2, 4), "\n")
+```
+
+**Interpretación de resultados:**
+
+El procedimiento de selección AIC con eliminación hacia atrás (backward elimination) identificó las variables con mayor poder predictivo. El modelo final utiliza solamente las variables que optimizan el balance entre ajuste y parsimonia, eliminando variables redundantes que contribuían principalmente ruido.
+
+La precisión en el conjunto de prueba muestra qué tan bien el modelo generaliza a datos no vistos durante el entrenamiento. Una precisión ±2 posiciones superior al 60% indica un modelo útil para predicción, especialmente considerando la complejidad inherente de predecir posiciones en una competencia de 20 equipos.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Regresión Ordinal
+
+```{r , echo=FALSE}
+#library(caret)
+#library(scoring)
+#set.seed(2017)
+#library(VGAM)
+#Tabla_Historica14 <- read_excel(Ubi1, sheet = "BD")
+#ind_val14 <- createDataPartition(Tabla_Historica14$Posicion, p = 0.7, list = F) # tomamos 70% de los datos para entrenamiento
+#Tabla_train <- Tabla_Historica14[ind_val14,]
+#Tabla_test <- Tabla_Historica14[-ind_val14,]
+
+#https://stats.oarc.ucla.edu/r/dae/ordinal-logistic-regression/
+
+modord1 <-vglm(Posicion~ GaF+GaC+GolContragolpe+Centros+CompetenciasEuropeas ,data=Tabla_Historica14, family = cumulative(parallel = TRUE, link = "logitlink")) 
+summary(modord1)
+
+
+#Resultados
+PosicionReal <-  Tabla_test[,1]
+Predicciones <- predict(modord1,Tabla_test,type="response")
+PosicionPred <- max.col(Predicciones, ties.method = "first")
+#predict(modord1,Tabla_Historica14[1,],type="response")
+
+resta <- abs(PosicionReal-PosicionPred)
+ProbSinError <- mean(resta < 1)
+ProbError1 <- mean(resta <= 1)
+ProbError2 <- mean(resta <= 2)
+
+ProbSinError
+ProbError1
+ProbError2
+
+
+#Repetir sin Covid
+ind_valcovid <- createDataPartition(tablasinpandemia$Posicion, p = 0.7, list = F)
+Tabla_traincovid <- tablasinpandemia[ind_valcovid,]
+Tabla_testcovid <- tablasinpandemia[-ind_valcovid,]
+
+
+modordcovid <-vglm(Posicion~ GaF+GaC+GolContragolpe+Centros+CompetenciasEuropeas ,data=tablasinpandemia, family = cumulative(parallel = TRUE, link = "logitlink")) 
+summary(modordcovid)
+#Resultados
+PosicionRealcovid <-  Tabla_testcovid[,1]
+Prediccionescovid <- predict(modordcovid,Tabla_testcovid,type="response")
+PosicionPredcovid <- max.col(Prediccionescovid, ties.method = "first")
+
+restaCovid <- abs(PosicionRealcovid-PosicionPredcovid)
+ProbSinErrorCovid <- mean(restaCovid < 1)
+ProbError1Covid <- mean(restaCovid <= 1)
+ProbError2Covid <- mean(restaCovid <= 2)
+
+ProbSinErrorCovid
+ProbError1Covid
+ProbError2Covid
+
+
+
+```
+Para comparar este modelo con el de regresión múltiple se utilizaron las mismas variables para predecir la posición de la tabla: Goles a Favor, Goles en Contra, Goles de contragolpe y Participación en competencias europeas. El modelo fue el siguiente:
+
+$$ logit(P(Posición≤1))= -10.26-.18*GaF+.19*GaC-.11*GolContragolpe+.003*Centros-1.07*CompetenciasEuropeas $$
+$$ logit(P(Posición≤2))= -7.17-.18*GaF+.19*GaC-.11*GolContragolpe+.003*Centros-1.07*CompetenciasEuropeas $$
+$$ logit(P(Posición≤3))= -5.19-.18*GaF+.19*GaC-.11*GolContragolpe+.003*Centros-1.07*CompetenciasEuropeas $$
+$$ logit(P(Posición≤4))= -3.69-.18*GaF+.19*GaC-.11*GolContragolpe+.003*Centros-1.07*CompetenciasEuropeas $$
+$$ logit(P(Posición≤5))= -2.36-.18*GaF+.19*GaC-.11*GolContragolpe+.003*Centros-1.07*CompetenciasEuropeas $$
+$$ logit(P(Posición≤6))= -1.21-.18*GaF+.19*GaC-.11*GolContragolpe+.003*Centros-1.07*CompetenciasEuropeas $$
+$$ logit(P(Posición≤7))= -.06-.18*GaF+.19*GaC-.11*GolContragolpe+.003*Centros-1.07*CompetenciasEuropeas $$
+$$ logit(P(Posición≤8))= 1.06-.18*GaF+.19*GaC-.11*GolContragolpe+.003*Centros-1.07*CompetenciasEuropeas $$
+$$ logit(P(Posición≤9))= 2.03-.18*GaF+.19*GaC-.11*GolContragolpe+.003*Centros-1.07*CompetenciasEuropeas $$
+$$ logit(P(Posición≤10))= 2.82-.18*GaF+.19*GaC-.11*GolContragolpe+.003*Centros-1.07*CompetenciasEuropeas $$
+$$ logit(P(Posición≤11))= 3.56-.18*GaF+.19*GaC-.11*GolContragolpe+.003*Centros-1.07*CompetenciasEuropeas $$
+$$ logit(P(Posición≤12))= 4.29-.18*GaF+.19*GaC-.11*GolContragolpe+.003*Centros-1.07*CompetenciasEuropeas $$
+$$ logit(P(Posición≤13))= 4.99-.18*GaF+.19*GaC-.11*GolContragolpe+.003*Centros-1.07*CompetenciasEuropeas $$
+$$ logit(P(Posición≤14))= 5.67-.18*GaF+.19*GaC-.11*GolContragolpe+.003*Centros-1.07*CompetenciasEuropeas $$
+$$ logit(P(Posición≤15))= 6.34-.18*GaF+.19*GaC-.11*GolContragolpe+.003*Centros-1.07*CompetenciasEuropeas $$
+$$ logit(P(Posición≤16))= 7.05-.18*GaF+.19*GaC-.11*GolContragolpe+.003*Centros-1.07*CompetenciasEuropeas $$
+$$ logit(P(Posición≤17))= 7.29-.18*GaF+.19*GaC-.11*GolContragolpe+.003*Centros-1.07*CompetenciasEuropeas $$
+$$ logit(P(Posición≤18))= 9.07-.18*GaF+.19*GaC-.11*GolContragolpe+.003*Centros-1.07*CompetenciasEuropeas $$
+$$ logit(P(Posición≤19))= 10.80-.18*GaF+.19*GaC-.11*GolContragolpe+.003*Centros-1.07*CompetenciasEuropeas $$
+
+
+Al evaluar el modelo se notó algo interesante, el Leicester City del 2016 que logró la hazaña de ser campeón, bajo este modelo solo tendría .002% de probabilidad de quedar en primer lugar, mientras que era más factible que terminara en cuarto lugar (34.87%). Aunque estadísticamente se esperaba un resultado muy distinto, el Leicester logró una de las mayores hazañas de la historia del deporte.
+
+
+
+# Regresión Ordinal V2
+
+```{r , echo=FALSE}
+library(readxl)
+library(VGAM)
+library(dplyr)
+
+# Cargar datos
+Ubi1 <- "C:/Ricardo/Tesis/Premier League estadísticas act.xlsx"
+Tabla_Historica <- read_excel(Ubi1, sheet = "BD")
+
+# Variables seleccionadas por AIC en Linear
+vars_aic_linear <- c("GaC", "GolDentroA", "GolFueraA", "GolContragolpe", 
+                     "Centros", "JugadoresNuevos", "JugadoresVendidos", 
+                     "CompetenciasEuropeas")
+
+# Preparar datos con solo esas 8 variables
+Tabla_Ord <- Tabla_Historica %>%
+  dplyr::select(Posicion, all_of(vars_aic_linear)) %>%
+  na.omit()
+
+cat("===== MODELO ORDINAL CON 8 VARIABLES AIC =====\n")
+cat("Variables iniciales:", paste(vars_aic_linear, collapse = ", "), "\n\n")
+
+# Modelo ordinal con las 8 variables AIC
+mod_ord_full <- vglm(Posicion ~ .,
+                     data = Tabla_Ord,
+                     family = cumulative(parallel = TRUE, link = "logitlink"))
+
+cat("Deviance:", deviance(mod_ord_full), "\n")
+cat("Log-likelihood:", logLik(mod_ord_full), "\n\n")
+
+# ===== BACKWARD ELIMINATION WITH LRT =====
+cat("===== BACKWARD ELIMINATION WITH LRT =====\n\n")
+
+mod_current <- mod_ord_full
+vars_remaining <- vars_aic_linear
+step_count <- 0
+
+for (iteration in 1:8) {
+  step_count <- step_count + 1
+  cat("STEP", step_count, ":\n")
+  cat("Variables restantes:", length(vars_remaining), "\n")
+  
+  lrt_results <- data.frame()
+  
+  for (var in vars_remaining) {
+    other_vars <- setdiff(vars_remaining, var)
+    
+    if (length(other_vars) > 0) {
+      formula_test <- as.formula(paste("Posicion ~", paste(other_vars, collapse = " + ")))
+      
+      mod_test <- tryCatch({
+        vglm(formula_test, data = Tabla_Ord,
+             family = cumulative(parallel = TRUE, link = "logitlink"))
+      }, error = function(e) NULL)
+      
+      if (!is.null(mod_test)) {
+        lrt_stat <- 2 * (logLik(mod_current) - logLik(mod_test))
+        p_value <- 1 - pchisq(as.numeric(lrt_stat), df = 1)
+        
+        lrt_results <- rbind(lrt_results, data.frame(
+          Variable = var,
+          LRT = as.numeric(lrt_stat),
+          p_value = p_value,
+          stringsAsFactors = FALSE
+        ))
+      }
+    }
+  }
+  
+  if (nrow(lrt_results) == 0) break
+  
+  lrt_results <- lrt_results %>% dplyr::arrange(p_value)
+  
+  cat("Variable menos significativa:\n")
+  print(lrt_results[1, ])
+  cat("\n")
+  
+  if (lrt_results$p_value[1] > 0.05) {
+    cat("STOP: Variable más débil tiene p > 0.05\n")
+    cat("Variables finales:", paste(vars_remaining, collapse = ", "), "\n\n")
+    break
+  }
+  
+  var_to_remove <- lrt_results$Variable[1]
+  cat("Removiendo:", var_to_remove, "\n\n")
+  
+  other_vars <- setdiff(vars_remaining, var_to_remove)
+  formula_new <- as.formula(paste("Posicion ~", paste(other_vars, collapse = " + ")))
+  
+  mod_current <- vglm(formula_new, data = Tabla_Ord,
+                      family = cumulative(parallel = TRUE, link = "logitlink"))
+  
+  vars_remaining <- other_vars
+}
+
+cat("===== MODELO FINAL ORDINAL =====\n")
+cat("Variables seleccionadas por LRT:", paste(vars_remaining, collapse = ", "), "\n\n")
+print(summary(mod_current))
+
+```
+
+
+```{r , echo=FALSE}
+
+library(readxl)
+library(VGAM)
+library(dplyr)
+
+# Cargar datos
+Ubi1 <- "C:/Ricardo/Tesis/Premier League estadísticas act.xlsx"
+Tabla_Historica <- read_excel(Ubi1, sheet = "BD")
+
+vars_aic <- c("GaC", "GolDentroA", "GolFueraA", "GolContragolpe", 
+              "Centros", "JugadoresNuevos", "JugadoresVendidos", 
+              "CompetenciasEuropeas")
+
+Tabla_Ord <- Tabla_Historica %>%
+  dplyr::select(Posicion, all_of(vars_aic)) %>%
+  na.omit()
+
+formula_ord <- as.formula(paste("Posicion ~", paste(vars_aic, collapse = " + ")))
+
+cat("===== MODELO ORDINAL CON 8 VARIABLES AIC =====\n")
+cat("Variables:", paste(vars_aic, collapse = ", "), "\n\n")
+
+mod_ord <- vglm(formula_ord, data = Tabla_Ord,
+                family = cumulative(parallel = TRUE, link = "logitlink"))
+
+cat("Log-likelihood:", logLik(mod_ord), "\n")
+cat("Deviance:", deviance(mod_ord), "\n")
+cat("Parámetros:", length(coef(mod_ord)), "\n\n")
+
+print(summary(mod_ord))
+```
+
+```{r , echo=FALSE}
+
+library(readxl)
+library(VGAM)
+library(dplyr)
+
+# Cargar datos
+Ubi1 <- "C:/Ricardo/Tesis/Premier League estadísticas act.xlsx"
+Tabla_Historica <- read_excel(Ubi1, sheet = "BD")
+
+# Todas las variables (40)
+Tabla_all <- Tabla_Historica %>%
+  dplyr::select(-Equipo, -Champions, -Descenso, -Temporada, -Anio, -XGF, -XGC, -GvsXG) %>%
+  na.omit()
+
+# 8 variables (AIC)
+vars_8 <- c("GaC", "GolDentroA", "GolFueraA", "GolContragolpe", 
+            "Centros", "JugadoresNuevos", "JugadoresVendidos", 
+            "CompetenciasEuropeas")
+Tabla_8 <- Tabla_all %>% dplyr::select(Posicion, all_of(vars_8))
+
+# 6 variables (sin JugadoresNuevos, JugadoresVendidos)
+vars_6 <- c("GaC", "GolDentroA", "GolFueraA", "GolContragolpe", 
+            "Centros", "CompetenciasEuropeas")
+Tabla_6 <- Tabla_all %>% dplyr::select(Posicion, all_of(vars_6))
+
+# 5 variables (sin Centros también)
+vars_5 <- c("GaC", "GolDentroA", "GolFueraA", "GolContragolpe", 
+            "CompetenciasEuropeas")
+Tabla_5 <- Tabla_all %>% dplyr::select(Posicion, all_of(vars_5))
+
+cat("===== COMPARACIÓN DE MODELOS ANIDADOS =====\n\n")
+
+# Modelo 40 variables
+cat("Modelo 1: 40 variables\n")
+tryCatch({
+  mod_40 <- vglm(Posicion ~ ., data = Tabla_all,
+                 family = cumulative(parallel = TRUE, link = "logitlink"))
+  ll_40 <- as.numeric(logLik(mod_40))
+  n_40 <- length(coef(mod_40))
+  cat("  LL:", ll_40, "| Parámetros:", n_40, "\n\n")
+}, error = function(e) {
+  cat("  ERROR: No converge con 40 variables\n\n")
+})
+
+# Modelo 8 variables
+cat("Modelo 2: 8 variables (AIC)\n")
+mod_8 <- vglm(Posicion ~ ., data = Tabla_8,
+              family = cumulative(parallel = TRUE, link = "logitlink"))
+ll_8 <- as.numeric(logLik(mod_8))
+n_8 <- length(coef(mod_8))
+cat("  LL:", ll_8, "| Parámetros:", n_8, "\n\n")
+
+# Modelo 6 variables
+cat("Modelo 3: 6 variables (sin Jugadores)\n")
+mod_6 <- vglm(Posicion ~ ., data = Tabla_6,
+              family = cumulative(parallel = TRUE, link = "logitlink"))
+ll_6 <- as.numeric(logLik(mod_6))
+n_6 <- length(coef(mod_6))
+cat("  LL:", ll_6, "| Parámetros:", n_6, "\n\n")
+
+# Modelo 5 variables
+cat("Modelo 4: 5 variables (sin Centros)\n")
+mod_5 <- vglm(Posicion ~ ., data = Tabla_5,
+              family = cumulative(parallel = TRUE, link = "logitlink"))
+ll_5 <- as.numeric(logLik(mod_5))
+n_5 <- length(coef(mod_5))
+cat("  LL:", ll_5, "| Parámetros:", n_5, "\n\n")
+
+# LRT Comparaciones
+cat("===== LIKELIHOOD RATIO TESTS =====\n\n")
+
+cat("8 vs 6 variables:\n")
+lrt_8_6 <- 2 * (ll_8 - ll_6)
+df_8_6 <- n_8 - n_6
+p_8_6 <- 1 - pchisq(lrt_8_6, df = df_8_6)
+cat("  LRT:", round(lrt_8_6, 4), "| DF:", df_8_6, "| p-value:", round(p_8_6, 4), "\n")
+if (p_8_6 > 0.05) cat("  → 6 variables es suficiente\n\n") else cat("  → 8 variables es mejor\n\n")
+
+cat("6 vs 5 variables:\n")
+lrt_6_5 <- 2 * (ll_6 - ll_5)
+df_6_5 <- n_6 - n_5
+p_6_5 <- 1 - pchisq(lrt_6_5, df = df_6_5)
+cat("  LRT:", round(lrt_6_5, 4), "| DF:", df_6_5, "| p-value:", round(p_6_5, 4), "\n")
+if (p_6_5 > 0.05) cat("  → 5 variables es suficiente\n\n") else cat("  → 6 variables es mejor\n\n")
+
+cat("===== CONCLUSIÓN =====\n")
+cat("Mejor modelo:", 
+    if (p_8_6 > 0.05 & p_6_5 > 0.05) "5 variables" 
+    else if (p_8_6 > 0.05) "6 variables" 
+    else "8 variables", "\n")
+
+```
+
+
+```{r , echo=FALSE}
+
+library(readxl)
+library(VGAM)
+library(caret)
+library(dplyr)
+
+# Cargar datos
+Ubi1 <- "C:/Ricardo/Tesis/Premier League estadísticas act.xlsx"
+Tabla_Historica <- read_excel(Ubi1, sheet = "BD")
+
+vars_5 <- c("GaC", "GolDentroA", "GolFueraA", "GolContragolpe", 
+            "CompetenciasEuropeas")
+
+# Preparar datos
+Tabla_5_full <- Tabla_Historica %>%
+  dplyr::select(Posicion, all_of(vars_5)) %>%
+  na.omit()
+
+cat("===== MODELO ORDINAL FINAL (5 VARIABLES) =====\n")
+cat("Variables:", paste(vars_5, collapse = ", "), "\n\n")
+
+# Ajustar modelo en todos los datos
+formula_5 <- as.formula(paste("Posicion ~", paste(vars_5, collapse = " + ")))
+mod_ord_final <- vglm(formula_5, data = Tabla_5_full,
+                      family = cumulative(parallel = TRUE, link = "logitlink"))
+
+cat("Summary del modelo final:\n\n")
+print(summary(mod_ord_final))
+
+# Train-test
+cat("\n\n===== TRAIN-TEST VALIDATION =====\n")
+set.seed(2017)
+ind_val <- createDataPartition(Tabla_Historica$Posicion, p = 0.7, list = FALSE)
+
+train_5 <- Tabla_Historica[ind_val, c("Posicion", vars_5)] %>% na.omit()
+test_5 <- Tabla_Historica[-ind_val, c("Posicion", vars_5)] %>% na.omit()
+
+cat("Train:", nrow(train_5), "| Test:", nrow(test_5), "\n\n")
+
+# Modelo en train
+mod_train <- vglm(formula_5, data = train_5,
+                  family = cumulative(parallel = TRUE, link = "logitlink"))
+
+# Predicciones
+pred_prob <- predict(mod_train, test_5, type = "response")
+pred_pos <- max.col(pred_prob, ties.method = "first")
+real_pos <- test_5$Posicion
+
+# Errores
+error <- abs(real_pos - pred_pos)
+acc_exact <- mean(error < 1)
+acc_pm1 <- mean(error <= 1)
+acc_pm2 <- mean(error <= 2)
+
+cat("===== PRECISIÓN EN TEST SET =====\n")
+cat("Exacta (±0):", round(acc_exact, 4), "\n")
+cat("±1 posición:", round(acc_pm1, 4), "\n")
+cat("±2 posiciones:", round(acc_pm2, 4), "\n")
+
+```
+
+
+#Poisson V2
+
+
+```{r , echo=FALSE}
+
+library(readxl)
+library(tidyverse)
+library(glue)
+
+# Cargar partidos 2023-2024
+partidos <- read_csv("C:/Ricardo/Tesis/Premier League 23 24.csv") %>%
+  dplyr::select(
+    home_team  = Home,
+    away_team  = Away,
+    home_goals = HomeGoals,
+    away_goals = AwayGoals
+  ) %>%
+  filter(!is.na(home_goals))
+
+cat("Datos cargados:", nrow(partidos), "partidos\n\n")
+
+# Preparar datos en formato largo (una fila por equipo por partido)
+model_data <- bind_rows(
+  partidos %>%
+    transmute(
+      goals     = home_goals,
+      attack    = home_team,
+      defense   = away_team,
+      home      = 1
+    ),
+  partidos %>%
+    transmute(
+      goals     = away_goals,
+      attack    = away_team,
+      defense   = home_team,
+      home      = 0
+    )
+)
+
+# Convertir a factores
+equipos <- sort(unique(c(partidos$home_team, partidos$away_team)))
+model_data <- model_data %>%
+  mutate(
+    attack  = factor(attack,  levels = equipos),
+    defense = factor(defense, levels = equipos)
+  )
+
+cat("===== MODELO POISSON GLM =====\n\n")
+
+# Ajustar GLM Poisson
+poisson_model <- glm(
+  goals ~ home + attack + defense,
+  data   = model_data,
+  family = poisson(link = "log")
+)
+
+cat("Model converged successfully\n")
+print(summary(poisson_model))
+
+cat("\n\n===== PARÁMETROS ESTIMADOS =====\n\n")
+
+# Extraer parámetros
+coefs <- coef(poisson_model)
+mu         <- coefs["(Intercept)"]
+home_adv   <- coefs["home"]
+
+# Parámetros de ataque y defensa
+attack_params  <- coefs[grepl("^attack", names(coefs))]
+defense_params <- coefs[grepl("^defense", names(coefs))]
+
+# Equipo de referencia
+ref_equipo <- equipos[1]
+attack_named   <- c(setNames(0, ref_equipo),
+                    setNames(attack_params,  gsub("^attack", "", names(attack_params))))
+defense_named  <- c(setNames(0, ref_equipo),
+                    setNames(defense_params, gsub("^defense", "", names(defense_params))))
+
+cat("Parámetro global (μ):", round(mu, 6), "\n")
+cat("Ventaja de local (α):", round(home_adv, 6), "\n\n")
+
+# Tabla de parámetros por equipo
+params_table <- data.frame(
+  Equipo = names(attack_named),
+  Alpha_ataque = round(as.numeric(attack_named), 6),
+  Delta_defensa = round(as.numeric(defense_named), 6),
+  stringsAsFactors = FALSE
+) %>% arrange(desc(Alpha_ataque))
+
+cat("===== PARÁMETROS POR EQUIPO =====\n")
+cat("(Ordenados por poder ofensivo)\n\n")
+print(params_table)
+
+cat("\n===== FUNCIÓN PARA PREDECIR RESULTADO =====\n\n")
+
+# Función para predecir probabilidades
+predecir_partido <- function(local, visitante, max_goles = 10) {
+  lambda_home <- exp(mu + home_adv + attack_named[local] + defense_named[visitante])
+  lambda_away <- exp(mu + attack_named[visitante] + defense_named[local])
+  
+  prob_matrix <- outer(
+    dpois(0:max_goles, lambda_home),
+    dpois(0:max_goles, lambda_away)
+  )
+  
+  p_local    <- sum(prob_matrix[lower.tri(prob_matrix, diag = FALSE)])
+  p_empate   <- sum(diag(prob_matrix))
+  p_visitante <- sum(prob_matrix[upper.tri(prob_matrix, diag = FALSE)])
+  
+  list(
+    lambda_home  = as.numeric(lambda_home),
+    lambda_away  = as.numeric(lambda_away),
+    p_local      = p_local,
+    p_empate     = p_empate,
+    p_visitante  = p_visitante
+  )
+}
+
+# Ejemplo
+cat("Ejemplo: Arsenal (local) vs Manchester City (visitante)\n")
+pred_ejemplo <- predecir_partido("Arsenal", "Manchester City")
+cat("λ_local (Arsenal):", round(pred_ejemplo$lambda_home, 4), "\n")
+cat("λ_visitante (Man City):", round(pred_ejemplo$lambda_away, 4), "\n")
+cat("P(Arsenal gana):", round(pred_ejemplo$p_local, 4), "\n")
+cat("P(Empate):", round(pred_ejemplo$p_empate, 4), "\n")
+cat("P(Man City gana):", round(pred_ejemplo$p_visitante, 4), "\n")
+
+
+```
+
+```{r , echo=FALSE}
+
+# Función para simular un partido
+simular_partido <- function(local, visitante) {
+  pred <- predecir_partido(local, visitante)
+  
+  goles_home <- rpois(1, pred$lambda_home)
+  goles_away <- rpois(1, pred$lambda_away)
+  
+  if (goles_home > goles_away) {
+    pts_home <- 3; pts_away <- 0
+  } else if (goles_home == goles_away) {
+    pts_home <- 1; pts_away <- 1
+  } else {
+    pts_home <- 0; pts_away <- 3
+  }
+  
+  tibble(local, visitante, goles_home, goles_away, pts_home, pts_away)
+}
+
+# Función para simular una temporada
+simular_temporada <- function() {
+  calendario <- expand.grid(
+    local     = equipos,
+    visitante = equipos,
+    stringsAsFactors = FALSE
+  ) %>% filter(local != visitante)
+  
+  resultados <- map2_dfr(
+    calendario$local,
+    calendario$visitante,
+    simular_partido
+  )
+  
+  tabla_home <- resultados %>%
+    group_by(equipo = local) %>%
+    summarise(pts = sum(pts_home), gf = sum(goles_home), gc = sum(goles_away), .groups = "drop")
+  
+  tabla_away <- resultados %>%
+    group_by(equipo = visitante) %>%
+    summarise(pts = sum(pts_away), gf = sum(goles_away), gc = sum(goles_home), .groups = "drop")
+  
+  tabla <- bind_rows(tabla_home, tabla_away) %>%
+    group_by(equipo) %>%
+    summarise(puntos = sum(pts), gf = sum(gf), gc = sum(gc), .groups = "drop") %>%
+    arrange(desc(puntos), desc(gf - gc), desc(gf)) %>%
+    mutate(posicion = row_number())
+  
+  tabla
+}
+
+cat("Simulando 1000 temporadas...\n")
+set.seed(20)
+simulaciones <- map(1:1000, ~simular_temporada(), .progress = TRUE)
+
+# Posición real
+tabla_real <- bind_rows(
+  partidos %>%
+    transmute(
+      equipo = home_team,
+      pts = case_when(
+        home_goals > away_goals ~ 3,
+        home_goals == away_goals ~ 1,
+        TRUE ~ 0
+      ),
+      gf = home_goals,
+      gc = away_goals
+    ),
+  partidos %>%
+    transmute(
+      equipo = away_team,
+      pts = case_when(
+        away_goals > home_goals ~ 3,
+        home_goals == away_goals ~ 1,
+        TRUE ~ 0
+      ),
+      gf = away_goals,
+      gc = home_goals
+    )
+) %>%
+  group_by(equipo) %>%
+  summarise(puntos = sum(pts), gf = sum(gf), gc = sum(gc), .groups = "drop") %>%
+  arrange(desc(puntos), desc(gf - gc), desc(gf)) %>%
+  mutate(posicion_real = row_number())
+
+# Posición predicha (media de simulaciones)
+posiciones_sim <- map_dfr(simulaciones, ~.x %>% select(equipo, posicion), .id = "sim")
+
+tabla_pred <- posiciones_sim %>%
+  group_by(equipo) %>%
+  summarise(
+    posicion_predicha = round(mean(posicion)),
+    .groups = "drop"
+  ) %>%
+  left_join(tabla_real %>% select(equipo, posicion_real), by = "equipo") %>%
+  mutate(error = abs(posicion_predicha - posicion_real)) %>%
+  arrange(posicion_real)
+
+# Precisión
+error_vec <- tabla_pred$error
+acc_exact <- mean(error_vec < 1)
+acc_pm1 <- mean(error_vec <= 1)
+acc_pm2 <- mean(error_vec <= 2)
+
+cat("\n===== PRECISIÓN POISSON EN TEST SET =====\n")
+cat("Exacta:", round(acc_exact, 4), "\n")
+cat("±1 posición:", round(acc_pm1, 4), "\n")
+cat("±2 posiciones:", round(acc_pm2, 4), "\n\n")
+
+cat("===== TABLA: REAL vs PREDICHA =====\n")
+print(tabla_pred)
+
+```
+```{r , echo=FALSE}
+
+library(readxl)
+library(tidyverse)
+
+# (Usar poisson_model, equipos, attack_named, defense_named del código anterior)
+
+cat("===== SIMULANDO 1000 TEMPORADAS POISSON =====\n\n")
+
+# Función para simular un partido
+simular_partido <- function(local, visitante) {
+  pred <- predecir_partido(local, visitante)
+  
+  goles_home <- rpois(1, pred$lambda_home)
+  goles_away <- rpois(1, pred$lambda_away)
+  
+  if (goles_home > goles_away) {
+    pts_home <- 3; pts_away <- 0
+  } else if (goles_home == goles_away) {
+    pts_home <- 1; pts_away <- 1
+  } else {
+    pts_home <- 0; pts_away <- 3
+  }
+  
+  tibble(local, visitante, goles_home, goles_away, pts_home, pts_away)
+}
+
+# Función para simular una temporada
+simular_temporada <- function() {
+  calendario <- expand.grid(
+    local = equipos,
+    visitante = equipos,
+    stringsAsFactors = FALSE
+  ) %>% filter(local != visitante)
+  
+  resultados <- map2_dfr(calendario$local, calendario$visitante, simular_partido)
+  
+  tabla_home <- resultados %>%
+    group_by(equipo = local) %>%
+    summarise(pts = sum(pts_home), gf = sum(goles_home), gc = sum(goles_away), .groups = "drop")
+  
+  tabla_away <- resultados %>%
+    group_by(equipo = visitante) %>%
+    summarise(pts = sum(pts_away), gf = sum(goles_away), gc = sum(goles_home), .groups = "drop")
+  
+  bind_rows(tabla_home, tabla_away) %>%
+    group_by(equipo) %>%
+    summarise(puntos = sum(pts), gf = sum(gf), gc = sum(gc), .groups = "drop") %>%
+    arrange(desc(puntos), desc(gf - gc)) %>%
+    mutate(posicion = row_number())
+}
+
+# Correr 1000 simulaciones
+set.seed(20)
+simulaciones <- replicate(1000, simular_temporada(), simplify = FALSE)
+
+cat("✓ Simulaciones completadas\n\n")
+
+# Tabla real
+tabla_real <- bind_rows(
+  partidos %>%
+    transmute(equipo = home_team, pts = ifelse(home_goals > away_goals, 3, ifelse(home_goals == away_goals, 1, 0)), gf = home_goals, gc = away_goals),
+  partidos %>%
+    transmute(equipo = away_team, pts = ifelse(away_goals > home_goals, 3, ifelse(home_goals == away_goals, 1, 0)), gf = away_goals, gc = home_goals)
+) %>%
+  group_by(equipo) %>%
+  summarise(puntos = sum(pts), gf = sum(gf), gc = sum(gc), .groups = "drop") %>%
+  arrange(desc(puntos), desc(gf - gc)) %>%
+  mutate(posicion_real = row_number())
+
+# Posición media predicha
+tabla_pred <- tibble(
+  equipo = equipos,
+  posicion_predicha = sapply(equipos, function(eq) {
+    round(mean(sapply(simulaciones, function(sim) sim$posicion[sim$equipo == eq])))
+  })
+) %>%
+  left_join(tabla_real %>% dplyr::select(equipo, posicion_real), by = "equipo") %>%
+  mutate(error = abs(posicion_predicha - posicion_real)) %>%
+  arrange(posicion_real)
+
+# Precisión
+error <- tabla_pred$error
+cat("===== PRECISIÓN POISSON =====\n")
+cat("Exacta:", round(mean(error < 1), 4), "\n")
+cat("±1 posición:", round(mean(error <= 1), 4), "\n")
+cat("±2 posiciones:", round(mean(error <= 2), 4), "\n\n")
+
+cat("===== TABLA: REAL vs PREDICHA =====\n")
+print(tabla_pred)
+
+```
+
+
+
+
+
+
+
+
+
+
+# Discriminación de dos poblaciones
+
+Ahora, existen dos grupos de puestos en la tabla en el fútbol inglés. El top 4 es de suma importancia ya que da acceso a la UEFA Champions League. Además de ser un torneo internacional de renombre, da exposición mundial y genera ingresos adicionales y superiores al club. 
+Asimismo, los últimos 3 lugares de la tabla son aquellos que representan el descenso, lo que genera un impacto en la imagen, moral y economía del club. Por estas razones, se harán modelos para tratar de predecir si un equipo podrá quedar en el top 4 y si podrá salvarse del descenso. En primer término se usarán las regresiones logísticas de Ridge y Lasso. En segundo término, se usará el método de discriminación lineal y cuadrática.
+
+
+
+# Champions
+
+## Logit 
+
+La Regresión Logística Simple es un método de regresión que permite estimar la probabilidad de una variable cualitativa binaria en función de una variable cuantitativa. Una de las principales
+aplicaciones de la regresión logística es la de clasificación binaria, en el que las observaciones se clasifican en un grupo u otro dependiendo del valor que tome la variable empleada como predictor. En particular, pra este trabajo se tratará de predecir si un equipo clasificará a Champions League y si se salvará del descenso. Como se mencionó previamente, se hará uso de dos subtipos de regresión logística: Lasso y Riddge.
+
+Los modelos de Lasso y Ridge tienen la problemática a resolver:
+
+AQUÍ VA EL PROBLEMA A RESOLVER EN LATEX
+
+Para cada lambda se tendrá una solución distinta, ya que esta controla el tamaño de los coeficientes. Por lo tanto, se utilizará validación cruzada para obtener la lambda que obtenga el mínimo error cuadrático medio.
+
+
+## Logit (Lasso)
+Para medir la eficacia de los siguientes modelos, se utilizará el 70% de la población como entrenamiento y un 30% de prueba
+```{r , echo=FALSE}
+# Logit con Lasso
+#Para disminuir type one modificar redondeo
+#lambda seleccionada se basa en la graf que considera cross valid, lambda min
+Tabla_Historica$Big6 <- as.numeric(Tabla_Historica$Big6)
+Tabla_Historica$Champions <- as.numeric(Tabla_Historica$Champions)
+Tabla_Historica$RecienAscendido <- as.numeric(Tabla_Historica$RecienAscendido)
+Tabla_Historica$Descenso <- as.numeric(Tabla_Historica$Descenso)
+Tabla_Historica$CompetenciasEuropeas <- as.numeric(Tabla_Historica$CompetenciasEuropeas)
+
+
+
+Tabla_Historica22C <- Tabla_Historica %>% filter(!is.na(XGF)) %>% select(-Equipo,-Posicion,-Descenso,-Temporada, -Anio)
+Tabla_Historica22D <- Tabla_Historica %>% filter(!is.na(XGF)) %>% select(-Equipo,-Posicion,-Champions,-Temporada, -Anio)
+#Tabla_Historica22D <- Tabla_Historica %>% select(-Equipo,-Posicion,-Champions,-Temporada, -Anio)
+
+set.seed(7) 
+muestra <- sample(1:nrow(Tabla_Historica22C),98)
+tlearn <- Tabla_Historica22C[muestra,]
+ttesting <- Tabla_Historica22C[-muestra,]
+
+library(glmnet)
+
+
+ttesting_logit_lasso <- ttesting
+logit_lasso <- glmnet(as.matrix(tlearn[,-40]), as.matrix(tlearn[40]), family = "binomial")
+cvfit <- cv.glmnet(as.matrix(tlearn[,-40]), as.matrix(tlearn[40]))
+plot(cvfit)
+coef(logit_lasso, s = cvfit$lambda.min)
+ttesting_logit_lasso$prediction <- predict(logit_lasso, as.matrix(ttesting_logit_lasso[,-1]), type = "response", s = cvfit$lambda.min)
+errorlasso <- ttesting_logit_lasso %>%
+  transmute(Champions,prediction = round(prediction),diff = abs(Champions - prediction)) %>%
+  pull(diff) %>%
+  mean()
+
+type1lasso <- ttesting_logit_lasso %>%
+  transmute(Champions,
+            prediction = round(prediction),
+            diff = Champions - prediction) %>%
+  mutate(diff = ifelse(diff < 0, 0, diff)) %>%
+  pull(diff) %>%
+  mean()
+
+type2lasso <- ttesting_logit_lasso %>%
+  transmute(Champions,
+            prediction = round(prediction),
+            diff = prediction - Champions) %>%
+  mutate(diff = ifelse(diff < 0, 0, diff)) %>%
+  pull(diff) %>%
+  mean()
+
+errorlasso
+type1lasso
+type2lasso
+cvfit$lambda.min
+
+```
+Este primer modelo arrojó una lambda de .0101 y una eficacia bastante mala de solo el 16% (0% de error tipo 1 y 83% de error tipo 2)
+
+## Logit (Ridge)
+
+```{r , echo=FALSE}
+
+ttesting_logit_ridge <- ttesting
+logit_ridge <- glmnet(as.matrix(tlearn[,-40]), as.matrix(tlearn[40]), family = "binomial", alpha = 0)
+cvfit <- cv.glmnet(as.matrix(tlearn[,-40]), as.matrix(tlearn[40]))
+plot(cvfit)
+coef(logit_ridge, s = cvfit$lambda.min)
+
+ttesting_logit_ridge$prediction <- predict(logit_ridge, as.matrix(ttesting_logit_ridge[,-1]), type = "response", s = cvfit$lambda.min)
+errorridge <- ttesting_logit_ridge %>%
+  transmute(Champions,
+            prediction = round(prediction),
+            diff = abs(Champions - prediction)) %>%
+  pull(diff) %>%
+  mean()
+
+type1ridge <- ttesting_logit_ridge %>%
+  transmute(Champions,
+            prediction = round(prediction),
+            diff = Champions - prediction) %>%
+  mutate(diff = ifelse(diff < 0, 0, diff)) %>%
+  pull(diff) %>%
+  mean()
+
+type2ridge <- ttesting_logit_ridge %>%
+  transmute(Champions,
+            prediction = round(prediction),
+            diff = prediction - Champions) %>%
+  mutate(diff = ifelse(diff < 0, 0, diff)) %>%
+  pull(diff) %>%
+  mean()
+
+errorridge
+type1ridge
+type2ridge
+cvfit$lambda.min
+```
+Este segundo modelo arrojó una lambda de .0176 y una eficacia mala de solo el 14% (0% de error tipo 1 y 85.7% de error tipo 2)
+
+## Discriminante lineal
+Además de la regresión logística se usó un análisis discriminante para comparar diferentes métodos en los que se separan poblaciones. Se usaron discriminantes lineales y cuadráticos para tener una visión más completa sobre los resultados. Se seguirán utilizando las variables GaF, GaC, GolContragolpe y CompetenciasEuropeas para realizar los siguientes modelos.
+```{r , echo=FALSE}
+Tabla_Historica23C <- Tabla_Historica %>% select(-Equipo,-Posicion,-Descenso,-Temporada, -Anio)
+Tabla_Historica23D <- Tabla_Historica %>% select(-Equipo,-Posicion,-Champions,-Temporada, -Anio)
+Tabla_Historica23 <- Tabla_Historica %>% select(-Equipo,-Posicion,-Temporada, -Anio)
+library(caret)
+set.seed(2017)
+ind_val <- createDataPartition(Tabla_Historica23$Champions, p = 0.7, list = F) # tomamos 70% de los datos para entrenamiento
+Champions_train <- Tabla_Historica23[ind_val,]
+Champions_test <- Tabla_Historica23[-ind_val,]
+control <- trainControl(method = "cv")
+metrica <- "Accuracy"
+
+
+
+set.seed(2017)
+fit.ldaC <- train(as.character(Champions) ~ GaF + GaC + GolContragolpe + CompetenciasEuropeas +Centros, 
+                 data = Champions_train,
+                 method = "lda", 
+                 metric = metrica,
+                 trControl = control)
+set.seed(2017)
+fit.qdaC <- train(as.character(Champions) ~ GaF + GaC + GolContragolpe + CompetenciasEuropeas+Centros, 
+                 data = Champions_train,
+                 method = "qda", 
+                 metric = metrica,
+                 trControl = control)
+
+resultadosC <- resamples(list(lda = fit.ldaC,
+                             qda = fit.qdaC))
+summary(resultadosC)
+dotplot(resultadosC)
+
+# Para el discriminante lineal
+prediccion.ldaC <- predict(fit.ldaC, Champions_test)
+(CMLC <- confusionMatrix(prediccion.ldaC, as.factor(Champions_test$Champions)))
+
+```
+Este tercer modelo de discriminación lineal tuvo una eficacia mucho mejor en comparación a las regresiones logísticas, 94.4% (1.9% de error tipo 1 y 3.7% de error tipo 2)
+
+
+
+
+# Logit y Lasso V2
+
+```{r , echo=FALSE}
+library(readxl)
+library(glmnet)
+library(dplyr)
+
+Ubi1 <- "C:/Ricardo/Tesis/Premier League estadísticas act.xlsx"
+Tabla_Historica <- read_excel(Ubi1, sheet = "BD")
+
+datos_prep <- Tabla_Historica %>%
+  filter(!is.na(XGF)) %>%
+  dplyr::select(-Equipo, -Temporada, -Anio, -XGF, -XGC, -GvsXG) %>%
+  na.omit()
+
+# ===== CHAMPIONS LEAGUE =====
+cat("===== CHAMPIONS LEAGUE =====\n\n")
+
+datos_champ <- datos_prep %>% dplyr::select(-Posicion, -Descenso)
+
+y_champ_full <- datos_champ$Champions
+X_champ_full <- as.matrix(datos_champ[, -which(names(datos_champ) == "Champions")])
+
+set.seed(7)
+idx_pos <- which(y_champ_full == 1)
+idx_neg <- which(y_champ_full == 0)
+
+train_pos <- sample(idx_pos, round(0.7 * length(idx_pos)))
+train_neg <- sample(idx_neg, round(0.7 * length(idx_neg)))
+train_idx <- c(train_pos, train_neg)
+test_idx <- setdiff(1:length(y_champ_full), train_idx)
+
+X_tr <- X_champ_full[train_idx, ]
+y_tr <- y_champ_full[train_idx]  # SIN restar 1
+X_te <- X_champ_full[test_idx, ]
+y_te <- y_champ_full[test_idx]
+
+cat("Train: n=", nrow(X_tr), "| Positivos=", sum(y_tr), "| Negativos=", sum(y_tr == 0), "\n")
+cat("Test: n=", nrow(X_te), "| Positivos=", sum(y_te), "| Negativos=", sum(y_te == 0), "\n")
+cat("Variables:", ncol(X_tr), "\n\n")
+
+# LASSO
+cat("--- LASSO ---\n")
+fit_la <- glmnet(X_tr, y_tr, family = "binomial", alpha = 1, standardize = TRUE, nlambda = 50)
+pred_la <- predict(fit_la, X_te, type = "response")
+acc_la <- sapply(1:ncol(pred_la), function(i) mean(round(pred_la[, i]) == y_te))
+best_idx_la <- which.max(acc_la)
+lambda_best_la <- fit_la$lambda[best_idx_la]
+cat("Lambda óptimo:", round(lambda_best_la, 6), "\n")
+cat("Accuracy:", round(acc_la[best_idx_la], 4), "\n\n")
+
+# RIDGE
+cat("--- RIDGE ---\n")
+fit_ri <- glmnet(X_tr, y_tr, family = "binomial", alpha = 0, standardize = TRUE, nlambda = 50)
+pred_ri <- predict(fit_ri, X_te, type = "response")
+acc_ri <- sapply(1:ncol(pred_ri), function(i) mean(round(pred_ri[, i]) == y_te))
+best_idx_ri <- which.max(acc_ri)
+lambda_best_ri <- fit_ri$lambda[best_idx_ri]
+cat("Lambda óptimo:", round(lambda_best_ri, 6), "\n")
+cat("Accuracy:", round(acc_ri[best_idx_ri], 4), "\n\n")
+
+# ===== DESCENSO =====
+cat("===== DESCENSO =====\n\n")
+
+datos_desc <- datos_prep %>% dplyr::select(-Posicion, -Champions)
+
+y_desc_full <- datos_desc$Descenso
+X_desc_full <- as.matrix(datos_desc[, -which(names(datos_desc) == "Descenso")])
+
+set.seed(7)
+idx_pos_d <- which(y_desc_full == 1)
+idx_neg_d <- which(y_desc_full == 0)
+
+train_pos_d <- sample(idx_pos_d, round(0.7 * length(idx_pos_d)))
+train_neg_d <- sample(idx_neg_d, round(0.7 * length(idx_neg_d)))
+train_idx_d <- c(train_pos_d, train_neg_d)
+test_idx_d <- setdiff(1:length(y_desc_full), train_idx_d)
+
+X_tr_d <- X_desc_full[train_idx_d, ]
+y_tr_d <- y_desc_full[train_idx_d]  # SIN restar 1
+X_te_d <- X_desc_full[test_idx_d, ]
+y_te_d <- y_desc_full[test_idx_d]
+
+cat("Train: n=", nrow(X_tr_d), "| Positivos=", sum(y_tr_d), "| Negativos=", sum(y_tr_d == 0), "\n")
+cat("Test: n=", nrow(X_te_d), "| Positivos=", sum(y_te_d), "| Negativos=", sum(y_te_d == 0), "\n")
+cat("Variables:", ncol(X_tr_d), "\n\n")
+
+# LASSO
+cat("--- LASSO ---\n")
+fit_la_d <- glmnet(X_tr_d, y_tr_d, family = "binomial", alpha = 1, standardize = TRUE, nlambda = 50)
+pred_la_d <- predict(fit_la_d, X_te_d, type = "response")
+acc_la_d <- sapply(1:ncol(pred_la_d), function(i) mean(round(pred_la_d[, i]) == y_te_d))
+best_idx_la_d <- which.max(acc_la_d)
+lambda_best_la_d <- fit_la_d$lambda[best_idx_la_d]
+cat("Lambda óptimo:", round(lambda_best_la_d, 6), "\n")
+cat("Accuracy:", round(acc_la_d[best_idx_la_d], 4), "\n\n")
+
+# RIDGE
+cat("--- RIDGE ---\n")
+fit_ri_d <- glmnet(X_tr_d, y_tr_d, family = "binomial", alpha = 0, standardize = TRUE, nlambda = 50)
+pred_ri_d <- predict(fit_ri_d, X_te_d, type = "response")
+acc_ri_d <- sapply(1:ncol(pred_ri_d), function(i) mean(round(pred_ri_d[, i]) == y_te_d))
+best_idx_ri_d <- which.max(acc_ri_d)
+lambda_best_ri_d <- fit_ri_d$lambda[best_idx_ri_d]
+cat("Lambda óptimo:", round(lambda_best_ri_d, 6), "\n")
+cat("Accuracy:", round(acc_ri_d[best_idx_ri_d], 4), "\n\n")
+
+# RESUMEN
+cat("===== RESUMEN LASSO/RIDGE =====\n")
+resumen <- data.frame(
+  Objetivo = c("Champions", "Champions", "Descenso", "Descenso"),
+  Modelo = c("Lasso", "Ridge", "Lasso", "Ridge"),
+  Lambda = c(round(lambda_best_la, 6), round(lambda_best_ri, 6),
+             round(lambda_best_la_d, 6), round(lambda_best_ri_d, 6)),
+  Accuracy = c(round(acc_la[best_idx_la], 4), round(acc_ri[best_idx_ri], 4),
+               round(acc_la_d[best_idx_la_d], 4), round(acc_ri_d[best_idx_ri_d], 4))
+)
+print(resumen)
+```
+
+
+# Variables para Lasso
+
+
+```{r , echo=FALSE}
+library(readxl)
+library(glmnet)
+library(dplyr)
+
+Ubi1 <- "C:/Ricardo/Tesis/Premier League estadísticas act.xlsx"
+Tabla_Historica <- read_excel(Ubi1, sheet = "BD")
+
+datos_prep <- Tabla_Historica %>%
+  filter(!is.na(XGF)) %>%
+  dplyr::select(-Equipo, -Temporada, -Anio, -XGF, -XGC, -GvsXG) %>%
+  na.omit()
+
+# ===== CHAMPIONS LEAGUE =====
+cat("===== CHAMPIONS LEAGUE - VARIABLES SELECCIONADAS =====\n\n")
+
+datos_champ <- datos_prep %>% dplyr::select(-Posicion, -Descenso)
+y_champ <- datos_champ$Champions
+X_champ <- as.matrix(datos_champ[, -which(names(datos_champ) == "Champions")])
+
+set.seed(7)
+idx_pos <- which(y_champ == 1)
+idx_neg <- which(y_champ == 0)
+train_idx <- c(sample(idx_pos, round(0.7 * length(idx_pos))), 
+               sample(idx_neg, round(0.7 * length(idx_neg))))
+test_idx <- setdiff(1:length(y_champ), train_idx)
+
+X_tr <- X_champ[train_idx, ]
+y_tr <- y_champ[train_idx]
+X_te <- X_champ[test_idx, ]
+y_te <- y_champ[test_idx]
+
+# LASSO - Extraer variables
+fit_la <- glmnet(X_tr, y_tr, family = "binomial", alpha = 1, standardize = TRUE, nlambda = 50)
+pred_la <- predict(fit_la, X_te, type = "response")
+acc_la <- sapply(1:ncol(pred_la), function(i) mean(round(pred_la[, i]) == y_te))
+best_idx_la <- which.max(acc_la)
+lambda_best_la <- fit_la$lambda[best_idx_la]
+
+coef_la <- coef(fit_la, s = lambda_best_la)
+coef_la_vec <- as.vector(coef_la)
+var_names <- rownames(coef_la)
+
+vars_selected_la <- var_names[coef_la_vec != 0][-1]  # Excluir intercept
+coefs_nonzero <- coef_la_vec[coef_la_vec != 0][-1]
+
+cat("LASSO - Variables seleccionadas (coef ≠ 0):\n")
+cat("N variables:", length(vars_selected_la), "\n")
+cat("Variables:", paste(vars_selected_la, collapse = ", "), "\n\n")
+cat("Coeficientes:\n")
+coef_df_la <- data.frame(Variable = vars_selected_la, Coef = coefs_nonzero)
+print(coef_df_la)
+
+# RIDGE - Top variables por magnitud
+cat("\n\nRIDGE - Top 10 variables por magnitud de coef:\n")
+fit_ri <- glmnet(X_tr, y_tr, family = "binomial", alpha = 0, standardize = TRUE, nlambda = 50)
+pred_ri <- predict(fit_ri, X_te, type = "response")
+acc_ri <- sapply(1:ncol(pred_ri), function(i) mean(round(pred_ri[, i]) == y_te))
+best_idx_ri <- which.max(acc_ri)
+lambda_best_ri <- fit_ri$lambda[best_idx_ri]
+
+coef_ri <- coef(fit_ri, s = lambda_best_ri)
+coef_ri_vec <- as.vector(coef_ri)
+ridge_df <- data.frame(Variable = var_names[-1], Coef = coef_ri_vec[-1])
+ridge_df <- ridge_df[order(abs(ridge_df$Coef), decreasing = TRUE), ]
+print(head(ridge_df, 10))
+
+# ===== DESCENSO =====
+cat("\n\n===== DESCENSO - VARIABLES SELECCIONADAS =====\n\n")
+
+datos_desc <- datos_prep %>% dplyr::select(-Posicion, -Champions)
+y_desc <- datos_desc$Descenso
+X_desc <- as.matrix(datos_desc[, -which(names(datos_desc) == "Descenso")])
+
+set.seed(7)
+idx_pos_d <- which(y_desc == 1)
+idx_neg_d <- which(y_desc == 0)
+train_idx_d <- c(sample(idx_pos_d, round(0.7 * length(idx_pos_d))), 
+                 sample(idx_neg_d, round(0.7 * length(idx_neg_d))))
+test_idx_d <- setdiff(1:length(y_desc), train_idx_d)
+
+X_tr_d <- X_desc[train_idx_d, ]
+y_tr_d <- y_desc[train_idx_d]
+X_te_d <- X_desc[test_idx_d, ]
+y_te_d <- y_desc[test_idx_d]
+
+# LASSO - Extraer variables
+fit_la_d <- glmnet(X_tr_d, y_tr_d, family = "binomial", alpha = 1, standardize = TRUE, nlambda = 50)
+pred_la_d <- predict(fit_la_d, X_te_d, type = "response")
+acc_la_d <- sapply(1:ncol(pred_la_d), function(i) mean(round(pred_la_d[, i]) == y_te_d))
+best_idx_la_d <- which.max(acc_la_d)
+lambda_best_la_d <- fit_la_d$lambda[best_idx_la_d]
+
+coef_la_d <- coef(fit_la_d, s = lambda_best_la_d)
+coef_la_d_vec <- as.vector(coef_la_d)
+var_names_d <- rownames(coef_la_d)
+
+vars_selected_la_d <- var_names_d[coef_la_d_vec != 0][-1]
+coefs_nonzero_d <- coef_la_d_vec[coef_la_d_vec != 0][-1]
+
+cat("LASSO - Variables seleccionadas (coef ≠ 0):\n")
+cat("N variables:", length(vars_selected_la_d), "\n")
+cat("Variables:", paste(vars_selected_la_d, collapse = ", "), "\n\n")
+cat("Coeficientes:\n")
+coef_df_la_d <- data.frame(Variable = vars_selected_la_d, Coef = coefs_nonzero_d)
+print(coef_df_la_d)
+
+# RIDGE
+cat("\n\nRIDGE - Top 10 variables por magnitud de coef:\n")
+fit_ri_d <- glmnet(X_tr_d, y_tr_d, family = "binomial", alpha = 0, standardize = TRUE, nlambda = 50)
+pred_ri_d <- predict(fit_ri_d, X_te_d, type = "response")
+acc_ri_d <- sapply(1:ncol(pred_ri_d), function(i) mean(round(pred_ri_d[, i]) == y_te_d))
+best_idx_ri_d <- which.max(acc_ri_d)
+lambda_best_ri_d <- fit_ri_d$lambda[best_idx_ri_d]
+
+coef_ri_d <- coef(fit_ri_d, s = lambda_best_ri_d)
+coef_ri_d_vec <- as.vector(coef_ri_d)
+ridge_df_d <- data.frame(Variable = var_names_d[-1], Coef = coef_ri_d_vec[-1])
+ridge_df_d <- ridge_df_d[order(abs(ridge_df_d$Coef), decreasing = TRUE), ]
+print(head(ridge_df_d, 10))
+
+```
+
+
+
+
+
+# LSA y QDA V2
+
+```{r , echo=FALSE}
+
+library(readxl)
+library(dplyr)
+library(caret)
+
+Ubi1 <- "C:/Ricardo/Tesis/Premier League estadísticas act.xlsx"
+Tabla_Historica <- read_excel(Ubi1, sheet = "BD")
+
+datos_prep <- Tabla_Historica %>%
+  filter(!is.na(XGF)) %>%
+  dplyr::select(-Equipo, -Temporada, -Anio, -XGF, -XGC, -GvsXG) %>%
+  na.omit()
+
+# Función Permutation Importance
+permutation_importance <- function(model, X_test, y_test) {
+  base_pred <- predict(model, X_test)
+  base_acc <- mean(base_pred == y_test)
+  
+  importance <- data.frame()
+  
+  for (var in colnames(X_test)) {
+    X_perm <- X_test
+    X_perm[[var]] <- sample(X_perm[[var]])
+    perm_pred <- predict(model, X_perm)
+    perm_acc <- mean(perm_pred == y_test)
+    imp <- base_acc - perm_acc
+    
+    importance <- rbind(importance, data.frame(Variable = var, Importance = imp))
+  }
+  
+  return(importance %>% arrange(desc(Importance)))
+}
+
+# ===== CHAMPIONS LEAGUE =====
+cat("===== CHAMPIONS LEAGUE - LDA =====\n\n")
+
+datos_champ <- datos_prep %>% dplyr::select(-Posicion, -Descenso)
+datos_champ$Champions <- as.factor(datos_champ$Champions)
+
+set.seed(7)
+idx_champ <- createDataPartition(datos_champ$Champions, p = 0.7, list = FALSE)
+train_champ <- datos_champ[idx_champ, ]
+test_champ <- datos_champ[-idx_champ, ]
+
+X_test_champ <- test_champ %>% dplyr::select(-Champions)
+y_test_champ <- test_champ$Champions
+
+# LDA con CV estratificado
+fit_lda_champ <- train(Champions ~ .,
+                       data = train_champ,
+                       method = "lda",
+                       metric = "Accuracy",
+                       trControl = trainControl(method = "cv", number = 3, 
+                                                classProbs = FALSE, savePredictions = FALSE))
+
+cat("Calculando importancia por permutación...\n")
+imp_lda_champ <- permutation_importance(fit_lda_champ, X_test_champ, y_test_champ)
+
+tabla_imp_champ <- imp_lda_champ %>% arrange(desc(Importance))
+
+cat("Top 15 variables por importancia:\n")
+print(head(tabla_imp_champ, 15))
+
+# Seleccionar variables en percentil 75
+umbral_champ <- quantile(tabla_imp_champ$Importance, 0.75)
+vars_importantes_champ <- tabla_imp_champ$Variable[tabla_imp_champ$Importance >= umbral_champ]
+
+cat("\nVariables percentil 75+:", paste(vars_importantes_champ, collapse = ", "), "\n")
+cat("N variables:", length(vars_importantes_champ), "\n")
+
+# Accuracy en test
+pred_lda_champ <- predict(fit_lda_champ, test_champ)
+acc_lda_champ <- confusionMatrix(pred_lda_champ, test_champ$Champions)$overall['Accuracy']
+
+cat("Accuracy LDA:", round(acc_lda_champ, 4), "\n\n")
+
+# ===== DESCENSO =====
+cat("===== DESCENSO - LDA =====\n\n")
+
+datos_desc <- datos_prep %>% dplyr::select(-Posicion, -Champions)
+datos_desc$Descenso <- as.factor(datos_desc$Descenso)
+
+set.seed(7)
+idx_desc <- createDataPartition(datos_desc$Descenso, p = 0.7, list = FALSE)
+train_desc <- datos_desc[idx_desc, ]
+test_desc <- datos_desc[-idx_desc, ]
+
+X_test_desc <- test_desc %>% dplyr::select(-Descenso)
+y_test_desc <- test_desc$Descenso
+
+fit_lda_desc <- train(Descenso ~ .,
+                      data = train_desc,
+                      method = "lda",
+                      metric = "Accuracy",
+                      trControl = trainControl(method = "cv", number = 3, 
+                                               classProbs = FALSE, savePredictions = FALSE))
+
+cat("Calculando importancia por permutación...\n")
+imp_lda_desc <- permutation_importance(fit_lda_desc, X_test_desc, y_test_desc)
+
+tabla_imp_desc <- imp_lda_desc %>% arrange(desc(Importance))
+
+cat("Top 15 variables por importancia:\n")
+print(head(tabla_imp_desc, 15))
+
+umbral_desc <- quantile(tabla_imp_desc$Importance, 0.75)
+vars_importantes_desc <- tabla_imp_desc$Variable[tabla_imp_desc$Importance >= umbral_desc]
+
+cat("\nVariables percentil 75+:", paste(vars_importantes_desc, collapse = ", "), "\n")
+cat("N variables:", length(vars_importantes_desc), "\n")
+
+pred_lda_desc <- predict(fit_lda_desc, test_desc)
+acc_lda_desc <- confusionMatrix(pred_lda_desc, test_desc$Descenso)$overall['Accuracy']
+
+cat("Accuracy LDA:", round(acc_lda_desc, 4), "\n\n")
+
+# RESUMEN
+cat("===== RESUMEN LDA =====\n")
+resumen_lda <- data.frame(
+  Objetivo = c("Champions", "Descenso"),
+  Accuracy = c(round(acc_lda_champ, 4), round(acc_lda_desc, 4)),
+  N_vars_p75 = c(length(vars_importantes_champ), length(vars_importantes_desc))
+)
+print(resumen_lda)
+
+```
+
+
+#Resultados
+
+```{r , echo=FALSE}
+cat("===== TABLA COMPARATIVA FINAL - TODOS LOS MODELOS =====\n\n")
+
+resumen_final <- data.frame(
+  Modelo = c("Linear (AIC)", "Ordinal (LRT)", "Poisson", "Lasso Champions", "Ridge Champions", "LDA Champions", "Lasso Descenso", "Ridge Descenso", "LDA Descenso"),
+  Objetivo = c("Posición", "Posición", "Posición", "Champions", "Champions", "Champions", "Descenso", "Descenso", "Descenso"),
+  N_Vars = c(8, 5, "N/A", 10, 37, 10, 2, 37, 12),
+  Precision_Metrica = c("Exacta: 19.23%", "Exacta: 19.23%", "Exacta: 25%", "Accuracy: 95.24%", "Accuracy: 95.24%", "Accuracy: 90.24%", "Accuracy: 90.48%", "Accuracy: 88.10%", "Accuracy: 80.49%"),
+  Metodo_Seleccion = c("AIC backward", "LRT backward", "Simulación", "Lasso CV", "Ridge CV", "Permutation Imp (p75)", "Lasso CV", "Ridge CV", "Permutation Imp (p75)")
+)
+
+print(resumen_final)
+
+cat("\n===== VARIABLES SELECCIONADAS POR MODELO =====\n\n")
+
+cat("LINEAR REGRESSION (8 variables):\n")
+cat("GaC, GolDentroA, GolFueraA, GolContragolpe, Centros, JugadoresNuevos, JugadoresVendidos, CompetenciasEuropeas\n\n")
+
+cat("ORDINAL REGRESSION (5 variables):\n")
+cat("GaC, GolDentroA, GolFueraA, GolContragolpe, CompetenciasEuropeas\n\n")
+
+cat("LASSO CHAMPIONS (10 variables):\n")
+cat("GaC, P0, TR, Tiros, GolFueraA, Paradas, DineroGastadoEnTransferenciasMillonesDeEuros, ValorPromedioJugadores, CompetenciasEuropeas, Big6\n\n")
+
+cat("RIDGE CHAMPIONS (Top 10 por magnitud):\n")
+cat("VentajaLocal, Big6, CompetenciasEuropeas, TR, P0, GolFueraA, PenalesProvocados, RecienAscendido, GolContragolpe, GolDePenal\n\n")
+
+cat("LDA CHAMPIONS (10 variables - percentil 75+):\n")
+cat("GolDentroA, GolFueraA, GaF, NumeroDePases, GaC, DF, ValorPromedioJugadores, ValorPlantilla, AsistenciaPromedioAlEstadio, CompetenciasEuropeas\n\n")
+
+cat("LASSO DESCENSO (2 variables):\n")
+cat("DF, P0\n\n")
+
+cat("RIDGE DESCENSO (Top 10 por magnitud):\n")
+cat("VentajaLocal, RecienAscendido, CompetenciasEuropeas, Big6, Auotgoles, P0, GolContragolpe, GolFueraA, TR, PenalesProvocados\n\n")
+
+cat("LDA DESCENSO (12 variables - percentil 75+):\n")
+cat("GaF, DF, GolDentroA, NumeroDePases, ValorPlantilla, GaC, PasesHaciaAtras, ValorPromedioJugadores, GolFueraA, GolContragolpe, PasesFiltrados, JugadoresNuevos\n\n")
+
+```
+
+
+
+
+
+## Discriminante cuadrático
+```{r , echo=FALSE}
+# Para el discriminante cuadrático
+prediccion.qdaC <- predict(fit.qdaC, Champions_test)
+(CMQC <- confusionMatrix(prediccion.qdaC, as.factor(Champions_test$Champions)))
+```
+Finalmente, el cuarto modelo de discriminación cuadrática tuvo una eficacia menor en comparación al discriminante lineal, 90.7% (3.7% de error tipo 1 y 5.6% de error tipo 2)
+
+## Conclusiones Champions
+INCLUIR UNA TABLA CON LOS RESULTADOS
+
+
+Al observar los resultados, el modelo con mayor eficiencia es el discriminate lineal con un 94.4%. Este modelo podría apoyar a equipos que aspiran a clasificar a Champions para encontrar objetivos de Goles a Favor, Goles en Contra, Centros y Goles de contragolpe para mejorar sus aspiraciones.
+
+# Descenso
+
+## Logit (Lasso)
+```{r , echo=FALSE}
+set.seed(7) 
+muestra <- sample(1:nrow(Tabla_Historica22D),98)
+tlearn <- Tabla_Historica22D[muestra,]
+ttesting <- Tabla_Historica22D[-muestra,]
+
+ttesting_logit_lasso <- ttesting
+logit_lasso <- glmnet(as.matrix(tlearn[,-40]), as.matrix(tlearn[40]), family = "binomial")
+cvfit <- cv.glmnet(as.matrix(tlearn[,-40]), as.matrix(tlearn[40]))
+plot(cvfit)
+coef(logit_lasso, s = cvfit$lambda.min)
+ttesting_logit_lasso$prediction <- predict(logit_lasso, as.matrix(ttesting_logit_lasso[,-1]), type = "response", s = cvfit$lambda.min)
+error <- ttesting_logit_lasso %>%
+  transmute(Descenso,prediction = round(prediction),diff = abs(Descenso - prediction)) %>%
+  pull(diff) %>%
+  mean()
+
+type1 <- ttesting_logit_lasso %>%
+  transmute(Descenso,
+            prediction = round(prediction),
+            diff = Descenso - prediction) %>%
+  mutate(diff = ifelse(diff < 0, 0, diff)) %>%
+  pull(diff) %>%
+  mean()
+
+type2 <- ttesting_logit_lasso %>%
+  transmute(Descenso,
+            prediction = round(prediction),
+            diff = prediction - Descenso) %>%
+  mutate(diff = ifelse(diff < 0, 0, diff)) %>%
+  pull(diff) %>%
+  mean()
+
+error
+type1
+type2
+cvfit$lambda.min
+
+```
+Este primer modelo arrojó una lambda de .0163 y una eficacia optimista del 83.33% (16.6% de error tipo 1 y 0% de error tipo 2)
+
+## Logit (Ridge)
+```{r , echo=FALSE}
+
+ttesting_logit_ridge <- ttesting
+logit_ridge <- glmnet(as.matrix(tlearn[,-40]), as.matrix(tlearn[40]), family = "binomial", alpha = 0)
+cvfit <- cv.glmnet(as.matrix(tlearn[,-40]), as.matrix(tlearn[40]))
+plot(cvfit)
+coef(logit_ridge, s = cvfit$lambda.min)
+
+ttesting_logit_ridge$prediction <- predict(logit_ridge, as.matrix(ttesting_logit_ridge[,-1]), type = "response", s = cvfit$lambda.min)
+error <- ttesting_logit_ridge %>%
+  transmute(Descenso,
+            prediction = round(prediction),
+            diff = abs(Descenso - prediction)) %>%
+  pull(diff) %>%
+  mean()
+
+type1 <- ttesting_logit_ridge %>%
+  transmute(Descenso,
+            prediction = round(prediction),
+            diff = Descenso - prediction) %>%
+  mutate(diff = ifelse(diff < 0, 0, diff)) %>%
+  pull(diff) %>%
+  mean()
+
+type2 <- ttesting_logit_ridge %>%
+  transmute(Descenso,
+            prediction = round(prediction),
+            diff = prediction - Descenso) %>%
+  mutate(diff = ifelse(diff < 0, 0, diff)) %>%
+  pull(diff) %>%
+  mean()
+
+error
+type1
+type2
+cvfit$lambda.min
+```
+Este segundo modelo arrojó una lambda de .0148 y una eficacia igual, del 83.3% (16.6% de error tipo 1 y 0% de error tipo 2)
+
+
+## Discriminante lineal
+```{r , echo=FALSE}
+
+library(caret)
+set.seed(2017)
+ind_val <- createDataPartition(Tabla_Historica23$Descenso, p = 0.7, list = F) # tomamos 70% de los datos para entrenamiento
+Descenso_train <- Tabla_Historica23[ind_val,]
+Descenso_test <- Tabla_Historica23[-ind_val,]
+ind_vala <- createDataPartition(Tabla_Historica23$Descenso, p = 0.7, list = F) # tomamos 70% de los datos para entrenamiento
+Descenso_traina <- Tabla_Historica23[ind_vala,]
+Descenso_testa <- Tabla_Historica23[-ind_vala,]
+control <- trainControl(method = "cv")
+metrica <- "Accuracy"
+
+
+
+set.seed(2017)
+fit.ldaD <- train(as.character(Descenso) ~ GaF + GaC + GolContragolpe + Centros, 
+                 data = Descenso_train,
+                 method = "lda", 
+                 metric = metrica,
+                 trControl = control)
+fit.qdaD <- train(as.character(Descenso) ~ GaF + GaC + GolContragolpe + Centros, 
+                 data = Descenso_traina,
+                 method = "qda", 
+                 metric = metrica,
+                 trControl = control)
+
+```
+```{r , echo=FALSE}
+resultadosD <- resamples(list(lda = fit.ldaD,
+                             qda = fit.qdaD))
+summary(resultadosD)
+dotplot(resultadosD)
+
+# Para el discriminante lineal
+prediccion.ldaD <- predict(fit.ldaD, Descenso_test)
+(CMLD <- confusionMatrix(prediccion.ldaD, as.factor(Descenso_test$Descenso)))
+```
+Este tercer modelo de discriminación lineal tuvo la segunda mejor eficacia comparación a las regresiones logísticas, 88.9% (9.2% de error tipo 1 y 1.9% de error tipo 2)
+
+
+## Discriminante cuadrático
+```{r , echo=FALSE}
+#Para el discriminante cuadrático
+prediccion.qdaD <- predict(fit.qdaD, Descenso_testa)
+(CMQD <- confusionMatrix(prediccion.qdaD, as.factor(Descenso_testa$Descenso)))
+```
+Finalmente, el cuarto modelo de discriminación cuadrática tuvo una eficacia igual en comparación al discriminante lineal, 88.9% (9.2% de error tipo 1 y 1.9% de error tipo 2)
+
+
+
+## Ejercicio de simulación Poisson
+
+##Datos
+```{r , echo=FALSE}
+
+# Basado en Lee (1997) - Modelo de Poisson
+
+
+
+library(tidyverse)
+library(glue)
+library(ggplot2)
+
+
+
+partidos <- read_csv("C:/Ricardo/Tesis/Premier League 23 24.csv") %>%
+  select(
+    home_team  = Home,
+    away_team  = Away,
+    home_goals = HomeGoals,
+    away_goals = AwayGoals
+  ) %>%
+  filter(!is.na(home_goals))
+```
+
+## Estimación del modelo Poisson (GLM)
+```{r , echo=FALSE}
+
+# Basado en Lee (1997) - Modelo de Poisson
+
+# Preparar datos en formato largo (una fila por equipo por partido)
+model_data <- bind_rows(
+  partidos %>%
+    transmute(
+      goals     = home_goals,
+      attack    = home_team,
+      defense   = away_team,
+      home      = 1
+    ),
+  partidos %>%
+    transmute(
+      goals     = away_goals,
+      attack    = away_team,
+      defense   = home_team,
+      home      = 0
+    )
+)
+
+# Convertir a factores (necesario para dummies en GLM)
+equipos <- sort(unique(c(partidos$home_team, partidos$away_team)))
+model_data <- model_data %>%
+  mutate(
+    attack  = factor(attack,  levels = equipos),
+    defense = factor(defense, levels = equipos)
+  )
+
+# Ajustar el GLM de Poisson
+# log(lambda) = mu + home*alpha_home + attack_i + defense_j
+poisson_model <- glm(
+  goals ~ home + attack + defense,
+  data   = model_data,
+  family = poisson(link = "log")
+)
+
+summary(poisson_model)
+
+# Extraer coeficientes
+coefs <- coef(poisson_model)
+mu         <- coefs["(Intercept)"]
+home_adv   <- coefs["home"]
+
+# Parámetros de ataque y defensa por equipo
+attack_params  <- coefs[str_detect(names(coefs), "^attack")]
+defense_params <- coefs[str_detect(names(coefs), "^defense")]
+
+# Nombrar correctamente (el equipo de referencia tiene parámetro 0)
+ref_equipo     <- equipos[1]
+attack_named   <- c(setNames(0, ref_equipo),
+                    setNames(attack_params,  str_remove(names(attack_params),  "^attack")))
+defense_named  <- c(setNames(0, ref_equipo),
+                    setNames(defense_params, str_remove(names(defense_params), "^defense")))
+```
+
+## Función para predecir lambdas y probabilidades de resultado
+```{r , echo=FALSE}
+
+predecir_partido <- function(local, visitante, max_goles = 10) {
+  
+  # Lambdas esperadas
+  lambda_home <- exp(mu + home_adv +
+                     attack_named[local]  + defense_named[visitante])
+  lambda_away <- exp(mu +
+                     attack_named[visitante] + defense_named[local])
+  
+  # Distribución conjunta P(X=h, Y=a) - Independencia de Poisson
+  prob_matrix <- outer(
+    dpois(0:max_goles, lambda_home),   # P(home = h)
+    dpois(0:max_goles, lambda_away)    # P(away = a)
+  )
+  
+  # Probabilidades de resultado
+  p_local    <- sum(prob_matrix[lower.tri(prob_matrix, diag = FALSE)])  # h > a
+  p_empate   <- sum(diag(prob_matrix))                                  # h = a
+  p_visitante <- sum(prob_matrix[upper.tri(prob_matrix, diag = FALSE)]) # h < a
+  
+  list(
+    lambda_home  = as.numeric(lambda_home),
+    lambda_away  = as.numeric(lambda_away),
+    p_local      = p_local,
+    p_empate     = p_empate,
+    p_visitante  = p_visitante
+  )
+}
+
+# Ejemplo: Arsenal vs Manchester City en casa de Arsenal
+predecir_partido("Arsenal", "Manchester City")
+```
+##  Simulación de una temporada completa
+```{r , echo=FALSE}
+
+simular_partido <- function(local, visitante) {
+  pred <- predecir_partido(local, visitante)
+  
+  # Simular goles directamente desde Poisson
+  goles_home <- rpois(1, pred$lambda_home)
+  goles_away <- rpois(1, pred$lambda_away)
+  
+  # Puntos según resultado
+  if (goles_home > goles_away) {
+    puntos_home <- 3; puntos_away <- 0
+  } else if (goles_home == goles_away) {
+    puntos_home <- 1; puntos_away <- 1
+  } else {
+    puntos_home <- 0; puntos_away <- 3
+  }
+  
+  tibble(
+    local      = local,
+    visitante  = visitante,
+    goles_home = goles_home,
+    goles_away = goles_away,
+    pts_home   = puntos_home,
+    pts_away   = puntos_away
+  )
+}
+
+simular_temporada <- function(equipos) {
+  
+  # Generar calendario: todos vs todos, ida y vuelta
+  calendario <- expand.grid(
+    local     = equipos,
+    visitante = equipos,
+    stringsAsFactors = FALSE
+  ) %>%
+    filter(local != visitante)
+  
+  # Simular cada partido
+  resultados <- map2_dfr(
+    calendario$local,
+    calendario$visitante,
+    simular_partido
+  )
+  
+  # Calcular tabla de posiciones
+  tabla_home <- resultados %>%
+    group_by(equipo = local) %>%
+    summarise(pts = sum(pts_home), gf = sum(goles_home), gc = sum(goles_away))
+  
+  tabla_away <- resultados %>%
+    group_by(equipo = visitante) %>%
+    summarise(pts = sum(pts_away), gf = sum(goles_away), gc = sum(goles_home))
+  
+  tabla <- bind_rows(tabla_home, tabla_away) %>%
+    group_by(equipo) %>%
+    summarise(
+      puntos = sum(pts),
+      gf     = sum(gf),
+      gc     = sum(gc),
+      dg     = gf - gc,
+      .groups = "drop"
+    ) %>%
+    arrange(desc(puntos), desc(dg), desc(gf))
+  
+  tabla
+}
+```
+
+## Monte Carlo: 1,000 temporadas simuladas
+```{r , echo=FALSE}
+
+set.seed(20)
+N_SIM <- 1000
+
+# Ejecutar simulaciones (puede tardar ~30-60 segundos)
+cat("Simulando", N_SIM, "temporadas...\n")
+simulaciones <- map(1:N_SIM, ~simular_temporada(equipos), .progress = TRUE)
+
+# --- Extraer estadísticas ---
+
+# Puntos promedio y desvío estándar por equipo
+puntos_por_sim <- map_dfr(simulaciones, ~.x %>% select(equipo, puntos),
+                           .id = "sim")
+
+resumen_sim <- puntos_por_sim %>%
+  group_by(equipo) %>%
+  summarise(
+    media_puntos = mean(puntos),
+    sd_puntos    = sd(puntos),
+    .groups      = "drop"
+  )
+
+# Proporción de veces que cada equipo terminó 1°, top 4 (Champions), último
+clasificacion_sim <- map_dfr(simulaciones, function(tabla) {
+  tabla %>%
+    mutate(posicion = row_number()) %>%
+    select(equipo, posicion)
+}, .id = "sim")
+
+prob_champions <- clasificacion_sim %>%
+  group_by(equipo) %>%
+  summarise(
+    prob_campeon   = mean(posicion == 1),
+    prob_top4      = mean(posicion <= 4),    # Clasificación Champions League
+    prob_descenso  = mean(posicion >= 18),   # Zona de descenso
+    .groups        = "drop"
+  )
+
+# Tabla final consolidada
+tabla_final <- resumen_sim %>%
+  left_join(prob_champions, by = "equipo") %>%
+  arrange(desc(media_puntos))
+
+print(tabla_final, n = 20)
+```
+## Visualizaciones
+```{r , echo=FALSE}
+# --- 6.1 Probabilidad de clasificar a Champions ---
+tabla_final %>%
+  mutate(equipo = fct_reorder(equipo, prob_top4)) %>%
+  ggplot(aes(x = equipo, y = prob_top4, fill = prob_top4)) +
+  geom_col() +
+  geom_text(aes(label = scales::percent(prob_top4, accuracy = 1)),
+            hjust = -0.1, size = 3) +
+  scale_fill_gradient(low = "#f7dc6f", high = "#1a5276") +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1.05)) +
+  coord_flip() +
+  labs(
+    title    = "Probabilidad de clasificar a Champions League",
+    subtitle = glue("Basado en {N_SIM} simulaciones - Modelo Poisson (Lee, 1997)"),
+    x        = NULL,
+    y        = "P(Top 4)",
+    fill     = NULL
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "none")
+
+# --- 6.2 Distribución de puntos para los top equipos ---
+top_equipos <- tabla_final$equipo[1:6]
+
+puntos_por_sim %>%
+  filter(equipo %in% top_equipos) %>%
+  mutate(equipo = factor(equipo, levels = top_equipos)) %>%
+  ggplot(aes(x = puntos, fill = equipo)) +
+  geom_histogram(binwidth = 3, alpha = 0.7, color = "white") +
+  facet_wrap(~equipo, scales = "free_y") +
+  labs(
+    title    = "Distribución de puntos al final de temporada",
+    subtitle = glue("{N_SIM} temporadas simuladas"),
+    x        = "Puntos", y = "Frecuencia"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# --- 6.3 Comparación: Puntos reales vs Simulados ---
+# (asumiendo que tienes los puntos reales guardados)
+puntos_reales <- partidos %>%
+  pivot_longer(cols = c(home_team, away_team),
+               names_to = "condicion", values_to = "equipo") %>%
+  mutate(pts = case_when(
+    condicion == "home_team" & home_goals > away_goals ~ 3,
+    condicion == "away_team" & away_goals > home_goals ~ 3,
+    home_goals == away_goals ~ 1,
+    TRUE ~ 0
+  )) %>%
+  group_by(equipo) %>%
+  summarise(pts_reales = sum(pts), .groups = "drop")
+
+comparacion <- tabla_final %>%
+  left_join(puntos_reales, by = "equipo") %>%
+  mutate(equipo = fct_reorder(equipo, pts_reales))
+
+ggplot(comparacion, aes(x = equipo)) +
+  geom_point(aes(y = pts_reales), color = "red",   size = 3, shape = 18) +
+  geom_point(aes(y = media_puntos), color = "steelblue", size = 3) +
+  geom_errorbar(aes(ymin = media_puntos - sd_puntos,
+                    ymax = media_puntos + sd_puntos),
+                color = "steelblue", width = 0.4, alpha = 0.6) +
+  coord_flip() +
+  labs(
+    title    = "Puntos reales vs. Simulados (media ± 1 SD)",
+    subtitle = "Rojo = real | Azul = simulación Monte Carlo",
+    x = NULL, y = "Puntos"
+  ) +
+  theme_minimal()
+```
+
+## Comparación con tu modelo de regresión ordinal
+```{r , echo=FALSE}
+# Extraer la posición final de cada equipo en cada simulación
+posiciones_sim <- map_dfr(simulaciones, function(tabla) {
+  tabla %>%
+    mutate(posicion = row_number()) %>%
+    select(equipo, posicion)
+}, .id = "sim")
+
+# Calcular proporción de veces que cada equipo quedó en cada posición
+tabla_probabilidades <- posiciones_sim %>%
+  group_by(equipo, posicion) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  mutate(probabilidad = n / N_SIM) %>%
+  select(-n) %>%
+  # Pivotear: filas = equipos, columnas = posiciones
+  pivot_wider(
+    names_from  = posicion,
+    values_from = probabilidad,
+    values_fill = 0
+  ) %>%
+  # Ordenar columnas de posición 1 a 20
+  select(equipo, as.character(1:20)) %>%
+  # Ordenar filas por probabilidad de quedar en posición 1 (de mayor a menor)
+  arrange(desc(`1`))
+
+# Renombrar columnas para que sean más legibles
+colnames(tabla_probabilidades) <- c("equipo", paste0("P", 1:20))
+
+print(tabla_probabilidades)
+
+
+# Calcular puntos reales desde los resultados
+# Paso 1: Posición real desde los resultados
+tabla_real <- bind_rows(
+  partidos %>%
+    transmute(
+      equipo = home_team,
+      pts = case_when(
+        home_goals > away_goals ~ 3,
+        home_goals == away_goals ~ 1,
+        TRUE ~ 0
+      ),
+      gf = home_goals,
+      gc = away_goals
+    ),
+  partidos %>%
+    transmute(
+      equipo = away_team,
+      pts = case_when(
+        away_goals > home_goals ~ 3,
+        home_goals == away_goals ~ 1,
+        TRUE ~ 0
+      ),
+      gf = away_goals,
+      gc = home_goals
+    )
+) %>%
+  group_by(equipo) %>%
+  summarise(
+    puntos = sum(pts),
+    gf     = sum(gf),
+    gc     = sum(gc),
+    dg     = gf - gc,
+    .groups = "drop"
+  ) %>%
+  arrange(desc(puntos), desc(dg), desc(gf)) %>%
+  mutate(posicion_real = row_number()) %>%
+  select(equipo, posicion_real)
+
+# Paso 2: Posición predicha = columna con mayor probabilidad
+tabla_final <- tabla_probabilidades %>%
+  mutate(
+    posicion_predicha = apply(
+      select(., starts_with("P")), 1,
+      function(x) which.max(x)
+    )
+  ) %>%
+  # Paso 3: Pegar posición real
+  left_join(tabla_real, by = "equipo") %>%
+  # Paso 4: Calcular error
+  mutate(error = abs(posicion_predicha - posicion_real)) %>%
+  # Paso 5: Ordenar por posición real y acomodar columnas
+  arrange(posicion_real) %>%
+  select(equipo, posicion_real, posicion_predicha, error, starts_with("P"))
+
+print(tabla_final)
+
+PosicionRealSim <-  tabla_final[,2]
+PrediccionesSim <- tabla_final[,3]
+
+restaSim <- abs(PosicionRealSim-PrediccionesSim)
+ProbSinErrorSim <- mean(restaSim < 1)
+ProbError1Sim <- mean(restaSim <= 1)
+ProbError2Sim <- mean(restaSim <= 2)
+
+ProbSinErrorSim
+ProbError1Sim
+ProbError2Sim
+```
+
+```{r , echo=FALSE}
+# ============================================================
+# SHAP VALUES - CHAMPIONS Y DESCENSO (VERSIÓN ROBUSTA)
+# ============================================================
+
+library(caret)
+library(dplyr)
+library(ggplot2)
+library(glmnet)
+
+print("✓ Librerías cargadas")
+
+# Datos
+Tabla_Historica23C <- Tabla_Historica %>% 
+  select(-Equipo, -Posicion, -Temporada, -Anio) %>%
+  na.omit()  # Remover NAs
+
+print(paste("✓ Datos cargados. Dimensiones:", nrow(Tabla_Historica23C), "x", ncol(Tabla_Historica23C)))
+
+vars <- c("GaF", "GaC", "GolContragolpe", "CompetenciasEuropeas", "Centros")
+
+# ============================================================
+# FUNCIÓN PARA CALCULAR SHAP MANUAL
+# ============================================================
+
+calculate_shap_linear <- function(model, X_test) {
+  tryCatch({
+    coefs <- coef(model)[-1]
+    X_mean <- colMeans(X_test)
+    X_centered <- sweep(as.matrix(X_test), 2, X_mean, "-")
+    shap_matrix <- sweep(X_centered, 2, coefs, "*")
+    
+    importance <- data.frame(
+      Variable = colnames(X_centered),
+      Importancia = colMeans(abs(shap_matrix))
+    ) %>% arrange(desc(Importancia))
+    
+    return(importance)
+  }, error = function(e) {
+    print(paste("Error en calculate_shap_linear:", e$message))
+    return(NULL)
+  })
+}
+
+# ============================================================
+# FUNCIÓN PARA PERMUTATION IMPORTANCE
+# ============================================================
+
+permutation_importance <- function(model, test_data, actual) {
+  tryCatch({
+    base_pred <- predict(model, test_data)
+    base_acc <- mean(base_pred == actual)
+    
+    importance <- data.frame()
+    
+    for (var in colnames(test_data)) {
+      test_permuted <- test_data
+      test_permuted[[var]] <- sample(test_permuted[[var]])
+      
+      perm_pred <- predict(model, test_permuted)
+      perm_acc <- mean(perm_pred == actual)
+      imp <- base_acc - perm_acc
+      
+      importance <- rbind(importance, 
+                          data.frame(Variable = var, Importancia = imp))
+    }
+    
+    return(importance %>% arrange(desc(Importancia)))
+  }, error = function(e) {
+    print(paste("Error en permutation_importance:", e$message))
+    return(NULL)
+  })
+}
+
+# ============================================================
+# LOOP PARA CHAMPIONS Y DESCENSO
+# ============================================================
+
+casos <- list(
+  Champions = "Champions",
+  Descenso = "Descenso"
+)
+
+for (caso_nombre in names(casos)) {
+  
+  print(paste("\n\n========== PROCESANDO:", caso_nombre, "==========\n"))
+  
+  target <- casos[[caso_nombre]]
+  
+  # Preparar datos
+  print(paste("Preparando datos para", target))
+  set.seed(2017)
+  ind_val <- createDataPartition(Tabla_Historica23C[[target]], p = 0.7, list = F)
+  train_data <- Tabla_Historica23C[ind_val,]
+  test_data <- Tabla_Historica23C[-ind_val,]
+  
+  print(paste("Train:", nrow(train_data), "| Test:", nrow(test_data)))
+  
+  # --- 1. REGRESIÓN LINEAL - SHAP ---
+  print("1. Calculando Regresión Lineal...")
+  tryCatch({
+    train_std <- train_data %>%
+      mutate(across(all_of(vars), scale))
+    
+    test_std <- test_data %>%
+      mutate(across(all_of(vars), ~(. - mean(train_data[[cur_column()]]))/sd(train_data[[cur_column()]])))
+    
+    mod_linear <- lm(as.formula(paste(target, "~ GaF + GaC + GolContragolpe + CompetenciasEuropeas + Centros")), 
+                     data = train_std)
+    
+    importance_linear <- calculate_shap_linear(mod_linear, test_std[, vars]) %>%
+      mutate(Modelo = "Regresión Lineal (SHAP)",
+             Importancia = Importancia / max(Importancia))
+    
+    print("✓ Regresión Lineal completada")
+  }, error = function(e) {
+    print(paste("✗ Error en Regresión Lineal:", e$message))
+  })
+  
+  # --- 2. REGRESIÓN ORDINAL - SHAP ---
+  print("2. Preparando Regresión Ordinal...")
+  tryCatch({
+    coef_ordinal <- c(-0.18, 0.19, -0.11, 0.003, -1.07)
+    
+    importance_ordinal <- data.frame(
+      Variable = c("GaF", "GaC", "GolContragolpe", "Centros", "CompetenciasEuropeas"),
+      Importancia = abs(coef_ordinal)
+    ) %>% arrange(desc(Importancia)) %>%
+      mutate(Modelo = "Regresión Ordinal (SHAP)",
+             Importancia = Importancia / max(Importancia))
+    
+    print("✓ Regresión Ordinal completada")
+  }, error = function(e) {
+    print(paste("✗ Error en Regresión Ordinal:", e$message))
+  })
+  
+  # --- 3. LOGIT LASSO - SHAP ---
+  print("3. Calculando Logit Lasso...")
+  tryCatch({
+    logit_lasso <- glmnet(as.matrix(train_data[, vars]), 
+                          as.matrix(train_data[[target]]), 
+                          family = "binomial", standardize = TRUE, alpha = 1)
+    
+    cvfit_lasso <- cv.glmnet(as.matrix(train_data[, vars]), 
+                             as.matrix(train_data[[target]]),
+                             family = "binomial",
+                             nfolds = 10,  # Aumentado de 5 a 10
+                             alpha = 1)
+    
+    coef_lasso <- coef(logit_lasso, s = cvfit_lasso$lambda.min)
+    importance_lasso <- data.frame(
+      Variable = rownames(coef_lasso)[-1],
+      Importancia = abs(as.numeric(coef_lasso[-1, 1]))
+    ) %>% arrange(desc(Importancia)) %>%
+      mutate(Modelo = "Logit Lasso (SHAP)",
+             Importancia = Importancia / max(Importancia))
+    
+    print("✓ Logit Lasso completada")
+  }, error = function(e) {
+    print(paste("✗ Error en Logit Lasso:", e$message))
+  })
+  
+  # --- 4. LOGIT RIDGE - SHAP ---
+  print("4. Calculando Logit Ridge...")
+  tryCatch({
+    logit_ridge <- glmnet(as.matrix(train_data[, vars]), 
+                          as.matrix(train_data[[target]]), 
+                          family = "binomial", standardize = TRUE, alpha = 0)
+    
+    cvfit_ridge <- cv.glmnet(as.matrix(train_data[, vars]), 
+                             as.matrix(train_data[[target]]),
+                             family = "binomial",
+                             nfolds = 10,
+                             alpha = 0)
+    
+    coef_ridge <- coef(logit_ridge, s = cvfit_ridge$lambda.min)
+    importance_ridge <- data.frame(
+      Variable = rownames(coef_ridge)[-1],
+      Importancia = abs(as.numeric(coef_ridge[-1, 1]))
+    ) %>% arrange(desc(Importancia)) %>%
+      mutate(Modelo = "Logit Ridge (SHAP)",
+             Importancia = Importancia / max(Importancia))
+    
+    print("✓ Logit Ridge completada")
+  }, error = function(e) {
+    print(paste("✗ Error en Logit Ridge:", e$message))
+  })
+  
+  # --- 5. LDA - PERMUTATION ---
+  print("5. Calculando LDA...")
+  tryCatch({
+    fit.lda <- train(as.formula(paste("as.character(", target, ") ~ GaF + GaC + GolContragolpe + CompetenciasEuropeas + Centros")), 
+                     data = train_data,
+                     method = "lda", 
+                     metric = "Accuracy",
+                     trControl = trainControl(method = "cv", number = 5))
+    
+    importance_lda <- permutation_importance(fit.lda, test_data[, vars], test_data[[target]]) %>%
+      mutate(Modelo = "LDA (Permutation)",
+             Importancia = Importancia / max(Importancia))
+    
+    print("✓ LDA completada")
+  }, error = function(e) {
+    print(paste("✗ Error en LDA:", e$message))
+  })
+  
+  # --- 6. QDA - PERMUTATION ---
+  print("6. Calculando QDA...")
+  tryCatch({
+    fit.qda <- train(as.formula(paste("as.character(", target, ") ~ GaF + GaC + GolContragolpe + CompetenciasEuropeas + Centros")), 
+                     data = train_data,
+                     method = "qda", 
+                     metric = "Accuracy",
+                     trControl = trainControl(method = "cv", number = 5))
+    
+    importance_qda <- permutation_importance(fit.qda, test_data[, vars], test_data[[target]]) %>%
+      mutate(Modelo = "QDA (Permutation)",
+             Importancia = Importancia / max(Importancia))
+    
+    print("✓ QDA completada")
+  }, error = function(e) {
+    print(paste("✗ Error en QDA:", e$message))
+  })
+  
+  # ============================================================
+  # CONSOLIDAR RESULTADOS
+  # ============================================================
+  
+  print("Consolidando resultados...")
+  
+  importancia_todos <- bind_rows(
+    importance_linear,
+    importance_ordinal,
+    importance_lasso,
+    importance_ridge,
+    importance_lda,
+    importance_qda
+  )
+  
+  tabla_resumen <- importancia_todos %>%
+    pivot_wider(names_from = Modelo, 
+                values_from = Importancia,
+                values_fill = 0) %>%
+    mutate(Promedio = rowMeans(select(., -Variable), na.rm = TRUE)) %>%
+    arrange(desc(Promedio))
+  
+  print(paste("\n=== TABLA RESUMEN -", caso_nombre, "==="))
+  print(tabla_resumen)
+  
+  # Guardar CSV
+  archivo_csv <- paste0("importancia_", tolower(caso_nombre), ".csv")
+  write.csv(tabla_resumen, archivo_csv, row.names = FALSE)
+  print(paste("✓ CSV guardado:", archivo_csv))
+}
+
+print("\n========== PROCESO COMPLETADO ==========")
+```
+
+```{r , echo=FALSE}
+print("=== CHAMPIONS LEAGUE ===")
+print(tabla_resumen)
+
+print("\n\n=== DESCENSO ===")
+
+
+```
